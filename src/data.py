@@ -11,7 +11,7 @@ from sklearn.preprocessing import StandardScaler  # type: ignore
 from consts import DATA_FOLDER, LABEL_COLUMN, NOT_SCALED_COLUMNS
 
 
-def load_csv_files() -> dict[str, pd.DataFrame]:
+def load_data() -> dict[str, pd.DataFrame]:
     """Load and merge CSV files from the data folder."""
     csv_files = glob.glob(os.path.join(DATA_FOLDER, "*.csv"))
 
@@ -24,6 +24,31 @@ def load_csv_files() -> dict[str, pd.DataFrame]:
         dataframes[name] = df
 
     return dataframes
+
+
+def pivot_categorical_events(
+    df: pd.DataFrame,
+    index_cols: list[str],
+    pivot_col: str,
+    prefix: str,
+) -> pd.DataFrame:
+    """Pivot a categorical column into binary indicator columns."""
+    df = df.copy()
+    df["val"] = 1
+
+    pivot = df.pivot_table(
+        index=index_cols,
+        columns=pivot_col,
+        values="val",
+        aggfunc="sum",
+        fill_value=0,
+    ).reset_index()
+
+    # Rename pivoted columns with prefix
+    pivot.columns = index_cols + [
+        f"{prefix}_{col}" for col in pivot.columns[len(index_cols) :]
+    ]  # type: ignore
+    return pivot
 
 
 def merge_multiple_dataframes(
@@ -48,18 +73,18 @@ def merge_multiple_dataframes(
         suffixes=("_error", "_failure"),
     )
 
-    df_maint = dataframes["PdM_maint"].copy()
-    df_maint["val"] = 1
-    df_maint_pivoted = df_maint.pivot_table(
-        index=["machineID", "datetime"],
-        columns="comp",
-        values="val",
-        aggfunc="sum",
-        fill_value=0,
-    ).reset_index()
-    merged_df = merged_df.merge(
-        df_maint_pivoted, on=["machineID", "datetime"], how="left"
-    )
+    for df_key, pivot_col, prefix in [
+        ("PdM_maint", "comp", "maint"),
+        ("PdM_failures", "failure", "failure"),
+        ("PdM_errors", "errorID", "code"),
+    ]:
+        pivoted = pivot_categorical_events(
+            dataframes[df_key],
+            index_cols=["machineID", "datetime"],
+            pivot_col=pivot_col,
+            prefix=prefix,
+        )
+        merged_df = merged_df.merge(pivoted, on=["machineID", "datetime"], how="left")
 
     merged_df = merged_df.merge(dataframes["PdM_machines"], on="machineID", how="left")
 
@@ -80,7 +105,7 @@ def _generate_failure_examples(
     machine_data: pd.DataFrame,
     seq_len: int,
     horizont: int,
-    failure_col: str,
+    label_col: str,
 ) -> list[tuple[pd.DataFrame, float]]:
     """Generate windowed failure examples for a machine. This labels are used for classification.
 
@@ -88,17 +113,18 @@ def _generate_failure_examples(
         machine_data (pd.DataFrame): Time-series data for one machine, sorted by datetime index.
         seq_len (int): Length of the sliding window.
         horizont (int): How many time steps in the future the failure occurs.
-        failure_col (str): Name of the column indicating failures (1 for failure, 0 for no failure)
+        label_col (str): Name of the column indicating failures (1 for failure, 0 for no failure)
     Returns:
         list[tuple[pd.DataFrame, float]]: list of (window, label=1) tuples.
     """
     examples = []
-    failure_indices = machine_data.index[machine_data[failure_col] == 1].tolist()
+    failure_indices = machine_data.index[machine_data[label_col] == 1].tolist()
     for fi in failure_indices:
         end_idx = fi - horizont
         start_idx = end_idx - seq_len
         if start_idx >= 0:
             window_df = machine_data.iloc[start_idx:end_idx]
+            window_df = window_df.drop(columns=[label_col], errors="ignore")
             examples.append((window_df, 1.0))
 
     return examples
@@ -109,7 +135,7 @@ def _generate_non_failure_examples(
     seq_len: int,
     horizont: int,
     num_examples: int,
-    failure_col: str,
+    label_col: str,
     random_state: Optional[int],
 ) -> list[tuple[pd.DataFrame, float]]:
     """Generate windowed non-failure examples to balance the dataset. Labels for classification.
@@ -119,7 +145,7 @@ def _generate_non_failure_examples(
         seq_len (int): Length of the sliding window.
         horizont (int): How many time steps in the future the failure occurs.
         num_examples (int): Number of negative examples to generate.
-        failure_col (str): Name of the column indicating failures.
+        label_col (str): Name of the column indicating failures.
         random_state (Optional[int]): Random seed for reproducibility.
 
     Returns:
@@ -128,7 +154,7 @@ def _generate_non_failure_examples(
     if random_state is not None:
         np.random.seed(random_state)
 
-    non_failure_indices = machine_data.index[machine_data[failure_col] == 0].tolist()
+    non_failure_indices = machine_data.index[machine_data[label_col] == 0].tolist()
     valid_non_failure_indices = [
         idx for idx in non_failure_indices if idx >= (horizont + seq_len)
     ]
@@ -146,6 +172,7 @@ def _generate_non_failure_examples(
         start_idx = end_idx - seq_len
         if start_idx >= 0:
             window_df = machine_data.iloc[start_idx:end_idx]
+            window_df = window_df.drop(columns=[label_col], errors="ignore")
             examples.append((window_df, 0.0))
 
     return examples
@@ -231,6 +258,7 @@ def _split_by_machine_ids(
     val_ratio: float = 0.2,
     test_ratio: float = 0.2,
     random_state: Optional[int] = None,
+    machine_id_col: str = "machineID",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Split the unique machine IDs into train/val/test subsets.
 
@@ -245,7 +273,7 @@ def _split_by_machine_ids(
         (train_machines, val_machines, test_machines)
         Each is a NumPy array of machine IDs.
     """
-    machine_ids = df["machineID"].unique()
+    machine_ids = df[machine_id_col].unique()
 
     total = train_ratio + val_ratio + test_ratio
     if not np.isclose(total, 1.0):
@@ -261,9 +289,49 @@ def _split_by_machine_ids(
     val_machines = machine_ids[60:80]
     test_machines = machine_ids[80:100]
 
-    train_df = df[df["machineID"].isin(train_machines)].copy()
-    val_df = df[df["machineID"].isin(val_machines)].copy()
-    test_df = df[df["machineID"].isin(test_machines)].copy()
+    train_df = df[df[machine_id_col].isin(train_machines)].copy()
+    val_df = df[df[machine_id_col].isin(val_machines)].copy()
+    test_df = df[df[machine_id_col].isin(test_machines)].copy()
+
+    return train_df, val_df, test_df
+
+
+def _split_by_time(
+    df: pd.DataFrame,
+    train_ratio: float = 0.6,
+    val_ratio: float = 0.2,
+    test_ratio: float = 0.2,
+    time_col: str = "timestamp",
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split the DataFrame by datetime, preserving chronological order across all machineIDs.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame with a datetime column.
+        time_col (str): Name of the datetime column.
+        train_ratio (float): Fraction of time for training.
+        val_ratio (float): Fraction of time for validation.
+        test_ratio (float): Fraction of time for testing.
+
+    Returns:
+        Tuple of train_df, val_df, test_df.
+    """
+    if not np.isclose(train_ratio + val_ratio + test_ratio, 1.0):
+        raise ValueError("train_ratio + val_ratio + test_ratio must sum to 1.0")
+
+    df = df.copy()
+    df[time_col] = pd.to_datetime(df[time_col])
+    df = df.sort_values(time_col)
+
+    min_time = df[time_col].min()
+    max_time = df[time_col].max()
+    total_duration = max_time - min_time
+
+    train_end = min_time + total_duration * train_ratio
+    val_end = train_end + total_duration * val_ratio
+
+    train_df = df[df[time_col] <= train_end]
+    val_df = df[(df[time_col] > train_end) & (df[time_col] <= val_end)]
+    test_df = df[df[time_col] > val_end]
 
     return train_df, val_df, test_df
 
@@ -291,12 +359,17 @@ def _scale_df(
                 numeric_cols.remove(col)
         scale_columns = numeric_cols
 
+    columns_to_scale = [
+        col
+        for col in scale_columns
+        if train_df[col].min() < 0.0 or train_df[col].max() > 1.0
+    ]
     scaler = StandardScaler()
-    scaler.fit(train_df[scale_columns])
+    scaler.fit(train_df[columns_to_scale])
 
-    train_df[scale_columns] = scaler.transform(train_df[scale_columns])
-    val_df[scale_columns] = scaler.transform(val_df[scale_columns])
-    test_df[scale_columns] = scaler.transform(test_df[scale_columns])
+    train_df[columns_to_scale] = scaler.transform(train_df[columns_to_scale])
+    val_df[columns_to_scale] = scaler.transform(val_df[columns_to_scale])
+    test_df[columns_to_scale] = scaler.transform(test_df[columns_to_scale])
 
     return train_df, val_df, test_df
 
@@ -304,6 +377,7 @@ def _scale_df(
 def select_columns(
     df: pd.DataFrame,
     features: Optional[list[str]] = None,
+    ignore_columns: Optional[list[str]] = None,
     label_col: str = LABEL_COLUMN,
 ) -> pd.DataFrame:
     """Select only the columns to keep, such as feature columns + label columns.
@@ -311,6 +385,7 @@ def select_columns(
     Args:
         df (pd.DataFrame): The original DataFrame.
         features (Optional[List[str]]): List of feature columns to keep. If None, keeps all.
+        ignore_columns (Optional[List[str]]): List of columns to exclude from the final output.
         label_cols (str): Label columns to keep. If None, keeps all.
 
     Returns:
@@ -324,7 +399,10 @@ def select_columns(
     elif missing_labels := [col for col in [label_col] if col not in df.columns]:
         raise ValueError(f"Missing label column: {missing_labels}")
 
-    keep_cols = features + [label_col]
+    keep_cols = set(features + [label_col])
+    if ignore_columns:
+        keep_cols -= set(ignore_columns)
+
     final_cols = [col for col in df.columns if col in keep_cols]
     return df[final_cols].copy()
 
@@ -336,7 +414,9 @@ def create_splits(
     random_state: Optional[int] = None,
     scale_columns: Optional[list[str]] = None,
     features: Optional[list[str]] = None,
+    ignore_columns: Optional[list[str]] = None,
     label_col: str = LABEL_COLUMN,
+    split_by_time: bool = False,
 ) -> tuple[
     list[tuple[pd.DataFrame, float]],
     list[tuple[pd.DataFrame, float]],
@@ -360,16 +440,25 @@ def create_splits(
             - val_examples (list[tuple[pd.DataFrame, float]])
             - test_examples (list[tuple[pd.DataFrame, float]])
     """
-    train_df, val_df, test_df = _split_by_machine_ids(
-        df,
-        train_ratio=0.6,
-        val_ratio=0.2,
-        test_ratio=0.2,
-        random_state=random_state,
-    )
-    train_df = select_columns(train_df, features, label_col)
-    val_df = select_columns(val_df, features, label_col)
-    test_df = select_columns(test_df, features, label_col)
+    if split_by_time:
+        train_df, val_df, test_df = _split_by_time(
+            df,
+            time_col="datetime",
+            train_ratio=0.6,
+            val_ratio=0.2,
+            test_ratio=0.2,
+        )
+    else:
+        train_df, val_df, test_df = _split_by_machine_ids(
+            df,
+            train_ratio=0.6,
+            val_ratio=0.2,
+            test_ratio=0.2,
+            random_state=random_state,
+        )
+    train_df = select_columns(train_df, features, ignore_columns, label_col)
+    val_df = select_columns(val_df, features, ignore_columns, label_col)
+    test_df = select_columns(test_df, features, ignore_columns, label_col)
 
     train_df, val_df, test_df = _scale_df(
         train_df,
@@ -404,24 +493,25 @@ def create_splits(
 
 
 if __name__ == "__main__":
-    dfs = load_csv_files()
+    dfs = load_data()
     final_df = merge_multiple_dataframes(dfs)
     train_split, val_split, test_split = create_splits(
         final_df, seq_len=25, horizont=24, random_state=42
     )
-    a = final_df[final_df["machineID"] == 1]
-    a[a["failure_flag"] == 1]
-    len(train_split)
-    # train_split[3]
-    train_split[0]
 
+    #! TODO:
+    # - Validate n o dataleakage with orignial value form the csv
+    # Automatically download the data
+    # Change the balancing function to avoid balance test and val
+    # Enforce positve horizonts
 
-# Change the balancing function to avoid balance test and val
-
-# EDA:
-# - Check for missing values
-# - Check for duplicates
-# - Check correlations
-# - Check distribution
-# - Checkk autocorlation for lags
-# - Check causality
+    # EDA:
+    # - Check for missing values
+    # - Check for duplicates
+    # - Check correlations
+    # - Check stationarity
+    # - Check for seasonality
+    # - Check for trends
+    # - Check distribution
+    # - Checkk autocorlation for lags
+    # - Check causality

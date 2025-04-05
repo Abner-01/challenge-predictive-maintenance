@@ -65,7 +65,7 @@ def test_no_failures() -> None:
     assert len(examples) == 0, "Expected 0 examples when no failures are present"
 
 
-def test_not_enough_negatives(small_df) -> None:
+def test_not_enough_negatives(small_df: pd.DataFrame) -> None:
     """Force a scenario with not enough negative rows to match the number of positives."""
     df_reduced = small_df.iloc[[2, 3, 6]].copy()
     # fix the index to [0,1,2] for clarity
@@ -111,3 +111,58 @@ def test_random_seed_reproducibility(small_df: pd.DataFrame) -> None:
         assert (
             w1.index == w2.index
         ).all(), "Negative window indices differ under same random seed"
+
+
+@pytest.mark.parametrize("horizon", [0, 1, 2])
+def test_horizon_prediction(small_df: pd.DataFrame, horizon: int) -> None:
+    """Verify that positive windows end exactly `horizon` steps before failure index.
+
+    - If a window would start at a negative index, it should not exist.
+    """
+    seq_len = 2
+    failure_indices = [3, 6]
+    examples = create_examples_for_machine(small_df, seq_len, horizon)
+
+    positives = [(win, int(lbl)) for (win, lbl) in examples if lbl == 1]
+    negatives = [(win, int(lbl)) for (win, lbl) in examples if lbl == 0]
+
+    _check_positive_windows(positives, failure_indices, seq_len, horizon)
+    _check_negative_windows(negatives, seq_len)
+
+
+def _check_positive_windows(
+    positives: list[tuple[pd.DataFrame, int]],
+    failure_indices: list[int],
+    seq_len: int,
+    horizon: int,
+) -> None:
+    """Check that positive windows are correctly aligned with failure indices."""
+    for fi in failure_indices:
+        end_idx = fi - horizon
+        start_idx = end_idx - seq_len
+
+        found = any(
+            list(win.index) == list(range(start_idx, end_idx))
+            for win, lbl in positives
+            if lbl == 1 and len(win) == seq_len
+        )
+
+        if start_idx < 0:
+            assert not found, (
+                f"Unexpected window found for failure at index {fi} "
+                f"with horizon {horizon} (start_idx < 0)"
+            )
+        else:
+            assert found, (
+                f"Expected window not found for failure at index {fi} "
+                f"with horizon {horizon}"
+            )
+
+
+def _check_negative_windows(
+    negatives: list[tuple[pd.DataFrame, int]], seq_len: int
+) -> None:
+    """Check that negative windows are of the expected length."""
+    for win, lbl in negatives:
+        assert lbl == 0, "Negative label expected"
+        assert len(win) == seq_len, "Negative window should match seq_len"
