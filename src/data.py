@@ -1,13 +1,14 @@
-"""Data Processing Module"""
+"""Data Processing Module."""
 
 import glob
-from typing import Optional
 import os
+from typing import Optional
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import StandardScaler  # type: ignore
-from consts import DATA_FOLDER
+
+from consts import DATA_FOLDER, LABEL_COLUMN, NOT_SCALED_COLUMNS
 
 
 def load_csv_files() -> dict[str, pd.DataFrame]:
@@ -67,6 +68,8 @@ def merge_multiple_dataframes(
 
     merged_df[categorical_cols] = merged_df[categorical_cols].fillna("none")
     merged_df[numeric_cols] = merged_df[numeric_cols].fillna(0)
+
+    # Label generated for a classification task.
     merged_df["failure_flag"] = merged_df["failure"].apply(
         lambda x: 0 if x == "none" else 1
     )
@@ -74,24 +77,29 @@ def merge_multiple_dataframes(
 
 
 def _generate_failure_examples(
-    machine_data: pd.DataFrame, seq_len: int, failure_col: str
-) -> list[tuple[pd.DataFrame, int]]:
-    """Generate windowed failure examples for a machine.
+    machine_data: pd.DataFrame,
+    seq_len: int,
+    horizont: int,
+    failure_col: str,
+) -> list[tuple[pd.DataFrame, float]]:
+    """Generate windowed failure examples for a machine. This labels are used for classification.
 
     Args:
         machine_data (pd.DataFrame): Time-series data for one machine, sorted by datetime index.
         seq_len (int): Length of the sliding window.
+        horizont (int): How many time steps in the future the failure occurs.
         failure_col (str): Name of the column indicating failures (1 for failure, 0 for no failure)
     Returns:
-        list[tuple[pd.DataFrame, int]]: list of (window, label=1) tuples.
+        list[tuple[pd.DataFrame, float]]: list of (window, label=1) tuples.
     """
     examples = []
     failure_indices = machine_data.index[machine_data[failure_col] == 1].tolist()
     for fi in failure_indices:
-        start_idx = fi - seq_len
+        end_idx = fi - horizont
+        start_idx = end_idx - seq_len
         if start_idx >= 0:
-            window_df = machine_data.iloc[start_idx:fi]
-            examples.append((window_df, 1))
+            window_df = machine_data.iloc[start_idx:end_idx]
+            examples.append((window_df, 1.0))
 
     return examples
 
@@ -99,41 +107,46 @@ def _generate_failure_examples(
 def _generate_non_failure_examples(
     machine_data: pd.DataFrame,
     seq_len: int,
+    horizont: int,
     num_examples: int,
     failure_col: str,
     random_state: Optional[int],
-) -> list[tuple[pd.DataFrame, int]]:
-    """Generate windowed non-failure examples to balance the dataset.
+) -> list[tuple[pd.DataFrame, float]]:
+    """Generate windowed non-failure examples to balance the dataset. Labels for classification.
 
     Args:
         machine_data (pd.DataFrame): Time-series data for one machine.
         seq_len (int): Length of the sliding window.
+        horizont (int): How many time steps in the future the failure occurs.
         num_examples (int): Number of negative examples to generate.
         failure_col (str): Name of the column indicating failures.
         random_state (Optional[int]): Random seed for reproducibility.
 
     Returns:
-        list[tuple[pd.DataFrame, int]]: list of (window, label=0) tuples.
+        list[tuple[pd.DataFrame, float]]: list of (window, label=0) tuples.
     """
     if random_state is not None:
         np.random.seed(random_state)
 
     non_failure_indices = machine_data.index[machine_data[failure_col] == 0].tolist()
-    non_failure_indices = [idx for idx in non_failure_indices if idx >= seq_len]
+    valid_non_failure_indices = [
+        idx for idx in non_failure_indices if idx >= (horizont + seq_len)
+    ]
 
     if len(non_failure_indices) < num_examples:
-        num_examples = len(non_failure_indices)
+        num_examples = len(valid_non_failure_indices)
 
     chosen_indices = np.random.choice(
-        non_failure_indices, size=num_examples, replace=False
+        valid_non_failure_indices, size=num_examples, replace=False
     )
     examples = []
 
     for nfi in chosen_indices:
-        start_idx = nfi - seq_len
+        end_idx = nfi - horizont
+        start_idx = end_idx - seq_len
         if start_idx >= 0:
-            window_df = machine_data.iloc[start_idx:nfi]
-            examples.append((window_df, 0))
+            window_df = machine_data.iloc[start_idx:end_idx]
+            examples.append((window_df, 0.0))
 
     return examples
 
@@ -141,24 +154,36 @@ def _generate_non_failure_examples(
 def create_examples_for_machine(
     machine_data: pd.DataFrame,
     seq_len: int,
+    horizont: int,
     random_state: Optional[int] = None,
-    label_col: str = "failure_flag",
-) -> list[tuple[pd.DataFrame, int]]:
+    label_col: str = LABEL_COLUMN,
+) -> list[tuple[pd.DataFrame, float]]:
     """Create balanced windowed examples for a single machine's time-series data.
 
     Args:
         machine_data (pd.DataFrame): Time-series data for one machine, sorted by datetime index.
         seq_len (int): Length of each sliding window.
+        horizont (int): How many time steps in the future the failure occurs.
         random_state (Optional[int], optional): Random seed for reproducibility. Defaults to None.
-        label_col (str, optional): Column name that marks failures. Defaults to "failure_flag".
+        label_col (str, optional): Column name that marks failures. Defaults to LABEL_COLUMN.
 
     Returns:
         list[tuple[pd.DataFrame, int]]: A list of (window, label) pairs, where label is 0
         (no failure) or 1 (failure).
     """
-    failure_examples = _generate_failure_examples(machine_data, seq_len, label_col)
+    failure_examples = _generate_failure_examples(
+        machine_data,
+        seq_len,
+        horizont,
+        label_col,
+    )
     non_failure_examples = _generate_non_failure_examples(
-        machine_data, seq_len, len(failure_examples), label_col, random_state
+        machine_data,
+        seq_len,
+        horizont,
+        len(failure_examples),
+        label_col,
+        random_state,
     )
     return failure_examples + non_failure_examples
 
@@ -166,19 +191,21 @@ def create_examples_for_machine(
 def create_examples_for_split(
     split_df: pd.DataFrame,
     seq_len: int,
+    horizont: int,
     random_state: Optional[int] = None,
-    label_col: str = "failure_flag",
-) -> list[tuple[pd.DataFrame, int]]:
+    label_col: str = LABEL_COLUMN,
+) -> list[tuple[pd.DataFrame, float]]:
     """Generate examples for all machines in a data split.
 
     Args:
         split_df (pd.DataFrame): Data containing multiple machines' time-series records.
         seq_len (int): Length of each sliding window.
+        horizont (int): How many time steps in the future the failure occurs.
         random_state (Optional[int], optional): Random seed for reproducibility. Defaults to None.
-        label_col (str, optional): Column name that marks failures. Defaults to "failure_flag".
+        label_col (str, optional): Column name that marks failures. Defaults to LABEL_COLUMN.
 
     Returns:
-        list[tuple[pd.DataFrame, int]]: list of (window, label) examples for all machines.
+        list[tuple[pd.DataFrame, float]]: list of (window, label) examples for all machines.
     """
     all_examples = []
     for _, machine_data in split_df.groupby("machineID"):
@@ -186,6 +213,7 @@ def create_examples_for_split(
         examples = create_examples_for_machine(
             machine_data,
             seq_len,
+            horizont,
             random_state,
             label_col,
         )
@@ -256,10 +284,9 @@ def _scale_df(
         (train_df_scaled, val_df_scaled, test_df_scaled)
     """
     if scale_columns is None:
-        # Choose all numeric columns except "machineID" or label columns
         numeric_cols = train_df.select_dtypes(include=["number"]).columns.tolist()
-        # Example: remove "machineID" or other ID columns if present
-        for col in ["machineID", "failure_flag", "comp1", "comp2", "comp3", "comp4"]:
+        # Remove "machineID" and other columns if present
+        for col in NOT_SCALED_COLUMNS:
             if col in numeric_cols:
                 numeric_cols.remove(col)
         scale_columns = numeric_cols
@@ -277,7 +304,7 @@ def _scale_df(
 def select_columns(
     df: pd.DataFrame,
     features: Optional[list[str]] = None,
-    label_col: str = "failure_flag",
+    label_col: str = LABEL_COLUMN,
 ) -> pd.DataFrame:
     """Select only the columns to keep, such as feature columns + label columns.
 
@@ -305,20 +332,22 @@ def select_columns(
 def create_splits(
     df: pd.DataFrame,
     seq_len: int,
+    horizont: int,
     random_state: Optional[int] = None,
     scale_columns: Optional[list[str]] = None,
     features: Optional[list[str]] = None,
-    label_col: str = "failure_flag",
+    label_col: str = LABEL_COLUMN,
 ) -> tuple[
-    list[tuple[pd.DataFrame, int]],
-    list[tuple[pd.DataFrame, int]],
-    list[tuple[pd.DataFrame, int]],
+    list[tuple[pd.DataFrame, float]],
+    list[tuple[pd.DataFrame, float]],
+    list[tuple[pd.DataFrame, float]],
 ]:
     """Split the dataset into train, validation, and test sets and generate examples.
 
     Args:
         df (pd.DataFrame): Full dataset containing all machines.
         seq_len (int): Length of each sliding window.
+        horizont (int): How many time steps in the future the failure occurs.
         random_state (Optional[int], optional): Random seed for reproducibility. Defaults to None.
         scale_columns (Optional[list[str]], optional): List of columns to scale.
             If None, automatically select numeric columns.
@@ -327,9 +356,9 @@ def create_splits(
 
     Returns:
         tuple: A tuple containing training, validation, and test examples as:
-            - train_examples (list[tuple[pd.DataFrame, int]])
-            - val_examples (list[tuple[pd.DataFrame, int]])
-            - test_examples (list[tuple[pd.DataFrame, int]])
+            - train_examples (list[tuple[pd.DataFrame, float]])
+            - val_examples (list[tuple[pd.DataFrame, float]])
+            - test_examples (list[tuple[pd.DataFrame, float]])
     """
     train_df, val_df, test_df = _split_by_machine_ids(
         df,
@@ -352,18 +381,21 @@ def create_splits(
     train_examples = create_examples_for_split(
         train_df,
         seq_len,
+        horizont,
         random_state,
         label_col,
     )
     val_examples = create_examples_for_split(
         val_df,
         seq_len,
+        horizont,
         random_state,
         label_col,
     )
     test_examples = create_examples_for_split(
         test_df,
         seq_len,
+        horizont,
         random_state,
         label_col,
     )
@@ -375,7 +407,7 @@ if __name__ == "__main__":
     dfs = load_csv_files()
     final_df = merge_multiple_dataframes(dfs)
     train_split, val_split, test_split = create_splits(
-        final_df, seq_len=25, random_state=42
+        final_df, seq_len=25, horizont=24, random_state=42
     )
     a = final_df[final_df["machineID"] == 1]
     a[a["failure_flag"] == 1]
@@ -384,7 +416,6 @@ if __name__ == "__main__":
     train_split[0]
 
 
-# Add a function to appy a transformation to de data
 # Change the balancing function to avoid balance test and val
 
 # EDA:

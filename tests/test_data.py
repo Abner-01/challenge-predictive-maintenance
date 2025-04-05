@@ -1,7 +1,10 @@
-import pytest
-import pandas as pd
-from src.data import create_examples_for_machine
+"""Test module for data.py."""
+
 import numpy as np
+import pandas as pd
+import pytest
+
+from src.data import create_examples_for_machine
 
 
 @pytest.fixture
@@ -24,7 +27,9 @@ def small_df() -> pd.DataFrame:
 def test_basic_functionality(small_df: pd.DataFrame) -> None:
     """Check that the function returns the expected number of examples."""
     seq_len = 3
-    examples = create_examples_for_machine(small_df, seq_len)
+    horizont = 0
+
+    examples = create_examples_for_machine(small_df, seq_len, horizont)
 
     assert len(examples) == 4, f"Expected 4 examples, got {len(examples)}"
 
@@ -52,7 +57,10 @@ def test_basic_functionality(small_df: pd.DataFrame) -> None:
 def test_no_failures() -> None:
     """The function should return 0 examples if there are no failures in the data."""
     df = pd.DataFrame({"failure_flag": [0, 0, 0, 0], "feature1": [10, 20, 30, 40]})
-    examples = create_examples_for_machine(df, seq_len=2)
+    seq_len = 2
+    horizont = 0
+
+    examples = create_examples_for_machine(df, seq_len, horizont)
 
     assert len(examples) == 0, "Expected 0 examples when no failures are present"
 
@@ -66,8 +74,10 @@ def test_not_enough_negatives(small_df) -> None:
     #   index: 0    1    2
     #   fail:  0    1    1
     # Only one non-failure row (index=0).
+    seq_len = 1
+    horizont = 0
 
-    examples = create_examples_for_machine(df_reduced, seq_len=1)
+    examples = create_examples_for_machine(df_reduced, seq_len, horizont)
     assert len(examples) == 2, f"Expected 2 examples, got {len(examples)}"
 
     # Confirm that 2 are positive, 0 is negative
@@ -81,9 +91,14 @@ def test_random_seed_reproducibility(small_df: pd.DataFrame) -> None:
     """Ensure that specifying a random_state leads to consistent negative window selection."""
     seq_len = 3
     rstate = 42
+    horizont = 0
 
-    examples_run1 = create_examples_for_machine(small_df, seq_len, random_state=rstate)
-    examples_run2 = create_examples_for_machine(small_df, seq_len, random_state=rstate)
+    examples_run1 = create_examples_for_machine(
+        small_df, seq_len, horizont, random_state=rstate
+    )
+    examples_run2 = create_examples_for_machine(
+        small_df, seq_len, horizont, random_state=rstate
+    )
 
     # The negative windows should be identical in order and content
     negative_windows_run1 = [win for (win, label) in examples_run1 if label == 0]
