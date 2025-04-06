@@ -1,104 +1,13 @@
-"""Data Processing Module."""
+"""Data splitting and preprocessing utilities for time-series data."""
 
-import glob
-import os
+import pickle
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler  # type: ignore
 
-from consts import DATA_FOLDER, LABEL_COLUMN, NOT_SCALED_COLUMNS
-
-
-def load_data() -> dict[str, pd.DataFrame]:
-    """Load and merge CSV files from the data folder."""
-    csv_files = glob.glob(os.path.join(DATA_FOLDER, "*.csv"))
-
-    dataframes = {}
-    for file in csv_files:
-        name = os.path.basename(file).split(".")[0]
-        df = pd.read_csv(file)
-        if "datetime" in df.columns:
-            df["datetime"] = pd.to_datetime(df["datetime"])
-        dataframes[name] = df
-
-    return dataframes
-
-
-def pivot_categorical_events(
-    df: pd.DataFrame,
-    index_cols: list[str],
-    pivot_col: str,
-    prefix: str,
-) -> pd.DataFrame:
-    """Pivot a categorical column into binary indicator columns."""
-    df = df.copy()
-    df["val"] = 1
-
-    pivot = df.pivot_table(
-        index=index_cols,
-        columns=pivot_col,
-        values="val",
-        aggfunc="sum",
-        fill_value=0,
-    ).reset_index()
-
-    # Rename pivoted columns with prefix
-    pivot.columns = index_cols + [
-        f"{prefix}_{col}" for col in pivot.columns[len(index_cols) :]
-    ]  # type: ignore
-    return pivot
-
-
-def merge_multiple_dataframes(
-    dataframes: dict[str, pd.DataFrame],
-) -> pd.DataFrame:
-    """Merge multiple DataFrames on common keys.
-
-    Args:
-        dataframes (dict[str, pd.DataFrame]): Dictionary containing DataFrames to merge,
-            identified by their names as keys.
-
-    Returns:
-        pd.DataFrame: Final merged DataFrame containing combined data from all provided DataFrames.
-    """
-    merged_df = dataframes["PdM_telemetry"].merge(
-        dataframes["PdM_errors"], on=["machineID", "datetime"], how="left"
-    )
-    merged_df = merged_df.merge(
-        dataframes["PdM_failures"],
-        on=["machineID", "datetime"],
-        how="left",
-        suffixes=("_error", "_failure"),
-    )
-
-    for df_key, pivot_col, prefix in [
-        ("PdM_maint", "comp", "maint"),
-        ("PdM_failures", "failure", "failure"),
-        ("PdM_errors", "errorID", "code"),
-    ]:
-        pivoted = pivot_categorical_events(
-            dataframes[df_key],
-            index_cols=["machineID", "datetime"],
-            pivot_col=pivot_col,
-            prefix=prefix,
-        )
-        merged_df = merged_df.merge(pivoted, on=["machineID", "datetime"], how="left")
-
-    merged_df = merged_df.merge(dataframes["PdM_machines"], on="machineID", how="left")
-
-    numeric_cols = merged_df.select_dtypes(include=["number"]).columns
-    categorical_cols = merged_df.select_dtypes(include=["object", "category"]).columns
-
-    merged_df[categorical_cols] = merged_df[categorical_cols].fillna("none")
-    merged_df[numeric_cols] = merged_df[numeric_cols].fillna(0)
-
-    # Label generated for a classification task.
-    merged_df["failure_flag"] = merged_df["failure"].apply(
-        lambda x: 0 if x == "none" else 1
-    )
-    return merged_df
+from consts import DATETIME_COLUMN, LABEL_COLUMN, NOT_SCALED_COLUMNS
 
 
 def _generate_failure_examples(
@@ -178,12 +87,32 @@ def _generate_non_failure_examples(
     return examples
 
 
+def _generate_all_non_failure_windows(
+    machine_data: pd.DataFrame,
+    seq_len: int,
+    horizon: int,
+    label_col: str,
+) -> list[tuple[pd.DataFrame, float]]:
+    """Generate all possible non-failure windows without balancing."""
+    all_non_failure_windows = []
+    total_length = len(machine_data)
+    for end_idx in range(seq_len + horizon, total_length):
+        window = machine_data.iloc[end_idx - horizon - seq_len : end_idx - horizon]
+        label = machine_data.iloc[end_idx][label_col]
+        if label == 0:
+            window = window.drop(columns=[label_col], errors="ignore")
+            all_non_failure_windows.append((window, 0.0))
+
+    return all_non_failure_windows
+
+
 def create_examples_for_machine(
     machine_data: pd.DataFrame,
     seq_len: int,
     horizon: int,
     random_state: Optional[int] = None,
     label_col: str = LABEL_COLUMN,
+    balance: bool = True,
 ) -> list[tuple[pd.DataFrame, float]]:
     """Create balanced windowed examples for a single machine's time-series data.
 
@@ -204,14 +133,22 @@ def create_examples_for_machine(
         horizon,
         label_col,
     )
-    non_failure_examples = _generate_non_failure_examples(
-        machine_data,
-        seq_len,
-        horizon,
-        len(failure_examples),
-        label_col,
-        random_state,
-    )
+    if balance:
+        non_failure_examples = _generate_non_failure_examples(
+            machine_data,
+            seq_len,
+            horizon,
+            len(failure_examples),
+            label_col,
+            random_state,
+        )
+    else:
+        non_failure_examples = _generate_all_non_failure_windows(
+            machine_data,
+            seq_len,
+            horizon,
+            label_col,
+        )
     return failure_examples + non_failure_examples
 
 
@@ -221,6 +158,7 @@ def create_examples_for_split(
     horizon: int,
     random_state: Optional[int] = None,
     label_col: str = LABEL_COLUMN,
+    balance: bool = True,
 ) -> list[tuple[pd.DataFrame, float]]:
     """Generate examples for all machines in a data split.
 
@@ -243,6 +181,7 @@ def create_examples_for_split(
             horizon,
             random_state,
             label_col,
+            balance=balance,
         )
         if random_state is not None:
             np.random.seed(random_state)
@@ -301,7 +240,7 @@ def _split_by_time(
     train_ratio: float = 0.6,
     val_ratio: float = 0.2,
     test_ratio: float = 0.2,
-    time_col: str = "timestamp",
+    time_col: str = DATETIME_COLUMN,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Split the DataFrame by datetime, preserving chronological order across all machineIDs.
 
@@ -332,44 +271,6 @@ def _split_by_time(
     train_df = df[df[time_col] <= train_end]
     val_df = df[(df[time_col] > train_end) & (df[time_col] <= val_end)]
     test_df = df[df[time_col] > val_end]
-
-    return train_df, val_df, test_df
-
-
-def _scale_df(
-    train_df: pd.DataFrame,
-    val_df: pd.DataFrame,
-    test_df: pd.DataFrame,
-    scale_columns: Optional[list[str]] = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Fit a StandardScaler on train_df[scale_columns], then transform train, val, test.
-
-    Args:
-        train_df, val_df, test_df (pd.DataFrame): DataFrames to scale.
-        scale_columns (Optional[List[str]]): Columns to scale. If None, pick numeric columns.
-
-    Returns:
-        (train_df_scaled, val_df_scaled, test_df_scaled)
-    """
-    if scale_columns is None:
-        numeric_cols = train_df.select_dtypes(include=["number"]).columns.tolist()
-        # Remove "machineID" and other columns if present
-        for col in NOT_SCALED_COLUMNS:
-            if col in numeric_cols:
-                numeric_cols.remove(col)
-        scale_columns = numeric_cols
-
-    columns_to_scale = [
-        col
-        for col in scale_columns
-        if train_df[col].min() < 0.0 or train_df[col].max() > 1.0
-    ]
-    scaler = StandardScaler()
-    scaler.fit(train_df[columns_to_scale])
-
-    train_df[columns_to_scale] = scaler.transform(train_df[columns_to_scale])
-    val_df[columns_to_scale] = scaler.transform(val_df[columns_to_scale])
-    test_df[columns_to_scale] = scaler.transform(test_df[columns_to_scale])
 
     return train_df, val_df, test_df
 
@@ -407,114 +308,220 @@ def select_columns(
     return df[final_cols].copy()
 
 
-def create_splits(
-    df: pd.DataFrame,
-    seq_len: int,
-    horizon: int,
-    random_state: Optional[int] = None,
-    scale_columns: Optional[list[str]] = None,
-    features: Optional[list[str]] = None,
-    ignore_columns: Optional[list[str]] = None,
-    label_col: str = LABEL_COLUMN,
-    split_by_time: bool = False,
-    enable_scaling: bool = True,
-) -> tuple[
-    list[tuple[pd.DataFrame, float]],
-    list[tuple[pd.DataFrame, float]],
-    list[tuple[pd.DataFrame, float]],
-]:
-    """Split the dataset into train, validation, and test sets and generate examples.
+class DataSplitter:
+    """Split a dataset into train, validation, and test sets.
+
+    Otionally by time or by machine IDs, and create sliding-window examples for time-series
+    modeling. Optionally applies standard scaling to numeric columns.
 
     Args:
-        df (pd.DataFrame): Full dataset containing all machines.
-        seq_len (int): Length of each sliding window.
-        horizon (int): How many time steps in the future the failure occurs.
+        seq_len (int): Length of each sliding window (number of time steps in the past).
+        horizon (int): How many time steps in the future until a "failure" event is considered.
         random_state (Optional[int], optional): Random seed for reproducibility. Defaults to None.
-        scale_columns (Optional[list[str]], optional): List of columns to scale.
-            If None, automatically select numeric columns.
-        label_col (str): Column name that marks failures. Defaults to "failure_flag".
-
-
-    Returns:
-        tuple: A tuple containing training, validation, and test examples as:
-            - train_examples (list[tuple[pd.DataFrame, float]])
-            - val_examples (list[tuple[pd.DataFrame, float]])
-            - test_examples (list[tuple[pd.DataFrame, float]])
+        scale_columns (Optional[list[str]], optional): Columns to scale using `StandardScaler`.
+            If None, it will pick numeric columns by default, excluding columns in
+            ``NOT_SCALED_COLUMNS``. Defaults to None.
+        features (Optional[list[str]], optional): Subset of columns to keep for training (besides
+            the label). If None, keep all columns (except those in `ignore_columns`). Defaults to
+            None.
+        ignore_columns (Optional[list[str]], optional): Columns to exclude from the dataset.
+            Defaults to None.
+        label_col (str, optional): Name of the label column for the failure flag. Defaults to
+            ``failure_flag``.
+        split_by_time (bool, optional): Whether to split the dataset based on time (True) or by
+            machine IDs (False). Defaults to False.
+        enable_scaling (bool, optional): Whether to apply standard scaling to numeric columns.
+            Defaults to True.
     """
-    if split_by_time:
-        train_df, val_df, test_df = _split_by_time(
-            df,
-            time_col="datetime",
-            train_ratio=0.6,
-            val_ratio=0.2,
-            test_ratio=0.2,
-        )
-    else:
-        train_df, val_df, test_df = _split_by_machine_ids(
-            df,
-            train_ratio=0.6,
-            val_ratio=0.2,
-            test_ratio=0.2,
-            random_state=random_state,
-        )
-    train_df = select_columns(train_df, features, ignore_columns, label_col)
-    val_df = select_columns(val_df, features, ignore_columns, label_col)
-    test_df = select_columns(test_df, features, ignore_columns, label_col)
 
-    if enable_scaling:
-        train_df, val_df, test_df = _scale_df(
+    def __init__(
+        self,
+        seq_len: int,
+        horizon: int,
+        random_state: Optional[int] = None,
+        scale_columns: Optional[list[str]] = None,
+        features: Optional[list[str]] = None,
+        ignore_columns: Optional[list[str]] = None,
+        label_col: str = LABEL_COLUMN,
+        split_by_time: bool = False,
+        enable_scaling: bool = True,
+    ) -> None:
+        """Initialize the DataSplitter with parameters for splitting and scaling."""
+        self.seq_len = seq_len
+        self.horizon = horizon
+        self.random_state = random_state
+        self.scale_columns = scale_columns
+        self.features = features
+        self.ignore_columns = ignore_columns
+        self.label_col = label_col
+        self.split_by_time = split_by_time
+        self.enable_scaling = enable_scaling
+        self.scaler: Optional[StandardScaler] = None
+
+    def create_splits(self, df: pd.DataFrame) -> tuple[
+        list[tuple[pd.DataFrame, float]],
+        list[tuple[pd.DataFrame, float]],
+        list[tuple[pd.DataFrame, float]],
+    ]:
+        """Split the dataset into train, validation, and test sets, then create sliding-window.
+
+        The split can be performed either by time or by machine IDs, depending on the value of
+        ``split_by_time``. After splitting, only columns specified in ``features`` are retained
+        (unless explicitly ignored in ``ignore_columns``).
+        If ``enable_scaling`` is True, numeric columns are scaled using a :class:`StandardScaler`
+        fitted on the training set.
+
+        Args:
+            df (pd.DataFrame): The full dataset containing data from all machines.
+
+        Returns:
+            tuple: A tuple of three lists (train_examples, val_examples, test_examples). Each list
+            contains tuples of the form (window_dataframe, label), where:
+
+            - ``window_dataframe`` is a `pd.DataFrame` of shape (seq_len, number_of_features).
+            - ``label`` is a float (0.0 or 1.0) indicating whether the window is a failure window
+                or not.
+        """
+        if self.split_by_time:
+            train_df, val_df, test_df = _split_by_time(
+                df,
+                time_col=DATETIME_COLUMN,
+                train_ratio=0.6,
+                val_ratio=0.2,
+                test_ratio=0.2,
+            )
+        else:
+            train_df, val_df, test_df = _split_by_machine_ids(
+                df,
+                train_ratio=0.6,
+                val_ratio=0.2,
+                test_ratio=0.2,
+                random_state=self.random_state,
+            )
+
+        train_df = select_columns(
+            train_df, self.features, self.ignore_columns, self.label_col
+        )
+        val_df = select_columns(
+            val_df, self.features, self.ignore_columns, self.label_col
+        )
+        test_df = select_columns(
+            test_df, self.features, self.ignore_columns, self.label_col
+        )
+
+        if self.enable_scaling:
+            train_df, val_df, test_df = self._scale_df(train_df, val_df, test_df)
+        else:
+            print(
+                "Warning: skipping scaling. Set enable_scaling=True to enable scaling."
+            )
+
+        train_examples = create_examples_for_split(
             train_df,
-            val_df,
-            test_df,
-            scale_columns=scale_columns,
+            self.seq_len,
+            self.horizon,
+            self.random_state,
+            self.label_col,
         )
-    else:
-        print("Warning skipping scaling. Set enable_scaling=True to enable scaling.")
+        val_examples = create_examples_for_split(
+            val_df,
+            self.seq_len,
+            self.horizon,
+            self.random_state,
+            self.label_col,
+            balance=True,
+        )
+        test_examples = create_examples_for_split(
+            test_df,
+            self.seq_len,
+            self.horizon,
+            self.random_state,
+            self.label_col,
+            balance=True,
+        )
 
-    train_examples = create_examples_for_split(
-        train_df,
-        seq_len,
-        horizon,
-        random_state,
-        label_col,
-    )
-    val_examples = create_examples_for_split(
-        val_df,
-        seq_len,
-        horizon,
-        random_state,
-        label_col,
-    )
-    test_examples = create_examples_for_split(
-        test_df,
-        seq_len,
-        horizon,
-        random_state,
-        label_col,
-    )
+        return train_examples, val_examples, test_examples
 
-    return train_examples, val_examples, test_examples
+    def _scale_df(
+        self,
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """Fit a `StandardScaler` on ``train_df[scale_columns]`` and transform sets.
+
+        The columns to be scaled are determined by ``self.scale_columns`` if provided. If
+        ``self.scale_columns`` is None, then numeric columns (excluding those in
+        ``NOT_SCALED_COLUMNS``) are automatically selected. Only columns with a min below 0.0 or
+        a max above 1.0 are actually scaled.
+
+        Args:
+            train_df (pd.DataFrame): Training split.
+            val_df (pd.DataFrame): Validation split.
+            test_df (pd.DataFrame): Test split.
+
+        Returns:
+            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+                The scaled (train_df, val_df, test_df).
+        """
+        if self.scale_columns is None:
+            numeric_cols = train_df.select_dtypes(include=["number"]).columns.tolist()
+            for col in NOT_SCALED_COLUMNS:
+                if col in numeric_cols:
+                    numeric_cols.remove(col)
+            self.scale_columns = numeric_cols
+
+        columns_to_scale = [
+            col
+            for col in self.scale_columns
+            if train_df[col].min() < 0.0 or train_df[col].max() > 1.0
+        ]
+        self.scaler = StandardScaler()
+        self.scaler.fit(train_df[columns_to_scale])
+
+        train_df[columns_to_scale] = self.scaler.transform(train_df[columns_to_scale])
+        val_df[columns_to_scale] = self.scaler.transform(val_df[columns_to_scale])
+        test_df[columns_to_scale] = self.scaler.transform(test_df[columns_to_scale])
+
+        return train_df, val_df, test_df
+
+    def get_scaler(self) -> Optional[StandardScaler]:
+        """Return the fitted `StandardScaler`.
+
+        Raises:
+            ValueError: If the scaler has not been fitted yet (i.e., ``create_splits``
+            has not been called).
+
+        Returns:
+            Optional[StandardScaler]: The fitted scaler if available, otherwise None.
+        """
+        if self.scaler is None:
+            raise ValueError(
+                "Scaler has not been fitted yet. Call create_splits first."
+            )
+        return self.scaler
+
+    def save_scaler(self, filepath: str) -> None:
+        """Save the fitted scaler to a pickle file.
+
+        Args:
+            filepath (str): Path to the file where the scaler should be saved.
+
+        Raises:
+            ValueError: If the scaler has not been fitted yet.
+        """
+        if self.scaler is None:
+            raise ValueError(
+                "Scaler has not been fitted yet. Call create_splits first."
+            )
+        with open(filepath, "wb") as f:
+            pickle.dump(self.scaler, f)
 
 
 if __name__ == "__main__":
+    from src.data.data_utils import load_data, merge_multiple_dataframes
+
     dfs = load_data()
     final_df = merge_multiple_dataframes(dfs)
-    train_split, val_split, test_split = create_splits(
-        final_df, seq_len=25, horizon=24, random_state=42
-    )
-
-    #! TODO:
-    # Automatically download the data
-    # Change the balancing function to avoid balance test and val
-    # Enforce positve horizonts
-
-    # EDA:
-    # - Check for missing values
-    # - Check for duplicates
-    # - Check correlations
-    # - Check stationarity
-    # - Check for seasonality
-    # - Check for trends
-    # - Check distribution
-    # - Checkk autocorlation for lags
-    # - Check causality
+    splitter = DataSplitter(seq_len=25, horizon=24, random_state=42)
+    train_split, val_split, test_split = splitter.create_splits(final_df)

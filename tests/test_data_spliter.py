@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.data import create_examples_for_machine
+from src.data.data_spliter import create_examples_for_machine
 
 
 @pytest.fixture

@@ -1,17 +1,32 @@
 import torch
-from torch import nn
-from torch.utils.data import DataLoader
+import xgboost as xgb
+import shap
+import matplotlib.pyplot as plt
+from sklearn.metrics import (  # type: ignore
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 
-from src.data import create_splits, load_data, merge_multiple_dataframes
-from src.features import (
+from src.data.data_spliter import DataSplitter
+from src.data.data_utils import (
+    find_first_positive,
+    find_last_positive,
+    load_data,
+    merge_multiple_dataframes,
+    validate_no_label_leakage,
+)
+from src.models.datasets import LSTMFailureDataset, XGBoostFailureDataset
+from src.models.lstm import LSTMNetwork
+from src.transformations.features import (
     add_time_since_last_event_features,
     encode_machine_model,
     encode_time,
 )
-from src.models.dataloader import FailureDataset
-from src.models.lstm_architecture import LSTMClassifier
-from src.models.trainer import evaluate, train_model
-from src.data_utils import validate_no_leakage, find_first_positive, find_last_positive
 
 ignored_columns = [
     "errorID",
@@ -33,17 +48,13 @@ ignored_columns = [
 ]
 HORIZON = 24
 dfs = load_data()
-dfs.keys()
-
 final_df = merge_multiple_dataframes(dfs)
 
 final_df = add_time_since_last_event_features(final_df)
 final_df = encode_time(final_df)
 final_df = encode_machine_model(final_df)
 
-
-train_split, val_split, test_split = create_splits(
-    final_df,
+splitter = DataSplitter(
     seq_len=25,
     horizon=HORIZON,
     random_state=42,
@@ -51,65 +62,105 @@ train_split, val_split, test_split = create_splits(
     split_by_time=True,
     enable_scaling=True,
 )
+train_split, val_split, test_split = splitter.create_splits(final_df)
 
+compare_timestamps(train_split, val_split)
 if first_positive := find_first_positive(train_split):
-    validate_no_leakage(
+    validate_no_label_leakage(
         first_positive[0],
         dfs["PdM_failures"],
         horizon=HORIZON,
     )
 
 if last_postive := find_last_positive(train_split):
-    validate_no_leakage(
+    validate_no_label_leakage(
         last_postive[0],
         dfs["PdM_failures"],
         horizon=HORIZON,
     )
 
+
 drop_cols = ["datetime", "machineID"]
-train_dataset = FailureDataset(train_split, drop_cols=drop_cols)
-val_dataset = FailureDataset(val_split, drop_cols=drop_cols)
-test_dataset = FailureDataset(test_split, drop_cols=drop_cols)
+train_dataset = LSTMFailureDataset(train_split, drop_cols=drop_cols)
+val_dataset = LSTMFailureDataset(val_split, drop_cols=drop_cols)
+test_dataset = LSTMFailureDataset(test_split, drop_cols=drop_cols)
 
 input_dim = train_split[0][0].shape[1] - len(drop_cols)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = LSTMClassifier(
-    input_size=input_dim,
+lstm = LSTMNetwork(
+    input_dim=input_dim,
+    device=device,
     hidden_size=128,
     num_layers=2,
     num_classes=2,
     dropout=0.3,
-).to(device)
-
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-loss_fn = nn.CrossEntropyLoss()
-
-train_model(
-    model=model,
+)
+lstm.fit(
     train_dataset=train_dataset,
     val_dataset=val_dataset,
-    epochs=10,
-    device=device,
-    loss_fn=loss_fn,
-    optimizer=optimizer,
-    batch_size=64,
-    experiment_name="failure-detection",
 )
-
-test_loader = DataLoader(
-    test_dataset,
-    drop_last=False,
-)
-
-result = evaluate(
-    model=model,
-    data_iter=test_loader,
-    device=device,
-    loss_fn=loss_fn,
+result = lstm.evaluate(
+    test_dataset=test_dataset,
     return_confusion_matrix=True,
 )
 
 if len(result) == 3:
     avg_loss, accuracy, conf_matrix = result
+    tn, fp, fn, tp = conf_matrix.ravel()
+    recall = tp / (tp + fn)
+    precision = tp / (tp + fp)
     print(conf_matrix)
+    print(accuracy)
+    print(recall)
+
+lstm.get_run()
+
+xgbtrain_dataset = XGBoostFailureDataset(
+    train_split, drop_cols=drop_cols, flatten_method="stack"
+)
+X_train, y_train = xgbtrain_dataset.get_data()
+model = xgb.XGBClassifier()
+model.fit(X_train, y_train)
+
+xgbtest_dataset = XGBoostFailureDataset(
+    test_split, drop_cols=drop_cols, flatten_method="stack"
+)
+X_test, y_test = xgbtest_dataset.get_data()
+
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]  # Probability of class 1
+
+acc = accuracy_score(y_test, y_pred)
+prec = precision_score(y_test, y_pred, zero_division=0)
+rec = recall_score(y_test, y_pred, zero_division=0)
+f1 = f1_score(y_test, y_pred, zero_division=0)
+auc = roc_auc_score(y_test, y_prob)
+cm = confusion_matrix(y_test, y_pred)
+report = classification_report(y_test, y_pred, digits=4)
+
+print("Evaluation Metrics on Test Set:")
+print(f"Accuracy:  {acc:.4f}")
+print(f"Precision: {prec:.4f}")
+print(f"Recall:    {rec:.4f}")
+print(f"F1 Score:  {f1:.4f}")
+print(f"AUC:       {auc:.4f}")
+print("\nConfusion Matrix:")
+print(cm)
+print("\nClassification Report:")
+print(report)
+
+explainer = shap.TreeExplainer(model)
+shap_values = explainer.shap_values(X_test)
+shap.summary_plot(
+    shap_values, X_test, feature_names=[f"f{i}" for i in range(X_test.shape[1])]
+)
+
+# Explain the first prediction
+shap.force_plot(explainer.expected_value, shap_values[0], X_test[0], matplotlib=True)
+plt.savefig("force_plot.png", bbox_inches="tight")
+shap.plots._waterfall.waterfall_legacy(
+    explainer.expected_value,
+    shap_values[0],
+    feature_names=[f"f{i}" for i in range(X_test.shape[1])],
+)

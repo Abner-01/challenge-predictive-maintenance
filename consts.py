@@ -22,3 +22,4 @@ NOT_SCALED_COLUMNS = [
     "datetime",
 ]
 LABEL_COLUMN = "failure_flag"
+DATETIME_COLUMN = "datetime"

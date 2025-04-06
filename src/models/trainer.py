@@ -6,6 +6,7 @@ import mlflow
 import mlflow.pytorch
 import numpy as np
 import torch
+from mlflow.entities import RunInfo
 from sklearn.metrics import confusion_matrix  # type: ignore
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
@@ -234,7 +235,7 @@ def train_model(
     experiment_name: Optional[str] = None,
     run_name: Optional[str] = None,
     log_model: bool = True,
-) -> None:
+) -> RunInfo:
     """Train and evaluate a model with MLflow tracking and logging.
 
     Args:
@@ -253,8 +254,8 @@ def train_model(
     """
     if experiment_name:
         mlflow.set_experiment(experiment_name)
-
-    with mlflow.start_run(run_name=run_name):
+    run_info = None
+    with mlflow.start_run(run_name=run_name) as run:
         _log_hyperparameters(epochs, batch_size, loss_fn, optimizer)
         train_loader, val_loader = _create_dataloaders(
             train_dataset, val_dataset, batch_size, num_workers
@@ -269,3 +270,6 @@ def train_model(
 
         if log_model:
             _log_trained_model(model, train_loader, device)
+        run_info = run.info
+
+    return run_info

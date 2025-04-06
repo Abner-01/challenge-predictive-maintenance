@@ -99,7 +99,7 @@ def encode_machine_model(df: pd.DataFrame, model_col: str = "model") -> pd.DataF
 
 
 if __name__ == "main":
-    from src.data import load_data, merge_multiple_dataframes
+    from src.data.data_utils import load_data, merge_multiple_dataframes
 
     dfs = load_data()
     final_df = merge_multiple_dataframes(dfs)

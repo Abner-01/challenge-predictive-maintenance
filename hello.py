@@ -1,14 +1,30 @@
-import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-import statsmodels.api as sm
-import statsmodels.formula.api as smf
+import pandas as pd
+import seaborn as sns  # type: ignore
+import statsmodels.formula.api as smf  # type: ignore
+
+#! TODO:
+# Automatically download the data
+# Change the balancing function to avoid balance test and val
+# Enforce positve horizonts
+# Convert create_splits into a class to return fited scaler
+# Add Random Forest
+
+# EDA:
+# - Check for missing values
+# - Check for duplicates
+# - Check correlations
+# - Check stationarity
+# - Check for seasonality
+# - Check for trends
+# - Check distribution
+# - Checkk autocorlation for lags
+# - Check causality
 
 # Choose numeric columns (adjust this list as needed)
 numeric_cols = ["volt", "rotate", "pressure", "vibration", "age", "failure_flag"]
 
-
+final_df = pd.read_csv("data/final_df.csv")
 # Compute correlation matrix
 corr_matrix = final_df[numeric_cols].corr()
 plt.figure(figsize=(10, 8))
@@ -48,7 +64,7 @@ print(logit_model.summary())
 # -----------------------------------
 # Install DoWhy via: pip install dowhy
 try:
-    from dowhy import CausalModel
+    from dowhy import CausalModel  # type: ignore
 except ImportError:
     print("DoWhy library not installed. Please install it with: pip install dowhy")
 else:

@@ -1661,6 +1661,15 @@ wheels = [
 ]
 
 [[package]]
+name = "nvidia-nccl-cu12"
+version = "2.26.2"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/5b/ca2f213f637305633814ae8c36b153220e40a07ea001966dcd87391f3acb/nvidia_nccl_cu12-2.26.2-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:5c196e95e832ad30fbbb50381eb3cbd1fadd5675e587a548563993609af19522", size = 291671495 },
+    { url = "https://files.pythonhosted.org/packages/67/ca/f42388aed0fddd64ade7493dbba36e1f534d4e6fdbdd355c6a90030ae028/nvidia_nccl_cu12-2.26.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:694cf3879a206553cc9d7dbda76b13efaf610fdb70a50cba303de1b0d1530ac6", size = 201319755 },
+]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.31.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2238,6 +2247,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "seaborn" },
+    { name = "shap" },
     { name = "statsmodels" },
     { name = "torch", version = "2.0.1", source = { registry = "https://download.pytorch.org/whl/cu118" }, marker = "platform_machine != 'x86_64'" },
     { name = "torch", version = "2.0.1+cu118", source = { registry = "https://download.pytorch.org/whl/cu118" }, marker = "platform_machine == 'x86_64'" },
@@ -2249,6 +2259,7 @@ dependencies = [
     { name = "types-tqdm" },
     { name = "typing-extensions" },
     { name = "typing-inspect" },
+    { name = "xgboost" },
 ]
 
 [package.optional-dependencies]
@@ -2286,6 +2297,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = "==1.3.0" },
     { name = "scipy", specifier = "==1.11.1" },
     { name = "seaborn", specifier = "==0.13.2" },
+    { name = "shap", specifier = "==0.47.1" },
     { name = "statsmodels", specifier = "==0.14.4" },
     { name = "torch", marker = "platform_machine != 'x86_64'", specifier = "==2.0.1", index = "https://download.pytorch.org/whl/cu118" },
     { name = "torch", marker = "platform_machine == 'x86_64'", specifier = "==2.0.1+cu118", index = "https://download.pytorch.org/whl/cu118" },
@@ -2297,6 +2309,7 @@ requires-dist = [
     { name = "types-tqdm", specifier = "==4.66.0.20240106" },
     { name = "typing-extensions", specifier = "==4.9.0" },
     { name = "typing-inspect", specifier = "==0.9.0" },
+    { name = "xgboost", specifier = "==3.0.0" },
 ]
 
 [[package]]
@@ -2480,12 +2493,47 @@ wheels = [
 ]
 
 [[package]]
+name = "shap"
+version = "0.47.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cloudpickle" },
+    { name = "numba" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "slicer" },
+    { name = "tqdm" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/33/7d/ffcdb3f245dba816e3c1de87549f1fc3067346c95219e4fcd91fc4bc7962/shap-0.47.1.tar.gz", hash = "sha256:292dc548c53fb0438fddacea793eb3482936621ad50a65529630684155625dce", size = 2501647 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/65/ccad788e04eff97de1afb0e3c46fedbb0690bfc1366aa0291bc6454b3550/shap-0.47.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:6afca56a634190133710f65c6618c942083d3533e6d2463bcd65317e12587c4d", size = 498900 },
+    { url = "https://files.pythonhosted.org/packages/58/88/5a6649b5b5336489d3d87246ac95420aff2bb30a9f90c8875c84a82740c7/shap-0.47.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:3275d45fafced93978ffeee5aeb035637e54646df5d86624b7d3c8317c77e5f7", size = 491789 },
+    { url = "https://files.pythonhosted.org/packages/97/b1/073fe5ea0d3aa78eeb0fde56bb4f0ccf403d41c1f8661ef37607c0270299/shap-0.47.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e5b9b39ef79a2e683ff11c54191aeb75ef4553e29ff4f3d4219a2bd8ddaf071b", size = 965119 },
+    { url = "https://files.pythonhosted.org/packages/2a/c2/aa91dbb9cc8eee20f5bd245fd8fe27fc45fba786c3e04d35ed510f111b17/shap-0.47.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a8acf428a8af28576d58770bdd81bf33bb82aaa00495f821e5dbf4b0d1028d74", size = 972561 },
+    { url = "https://files.pythonhosted.org/packages/d7/a3/73036cf72cce268ad4d338d648e3ec1e0f035fe047a48bb634f114f0167a/shap-0.47.1-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:4789ef942e7f57aa9810497c1fdd0fba0011a9fce91010802ff39cfac4bd8921", size = 1990476 },
+    { url = "https://files.pythonhosted.org/packages/72/28/d4dcf1b06761c916f642e0fe1293ed8081ce32991b32eada2212f639433c/shap-0.47.1-cp311-cp311-win_amd64.whl", hash = "sha256:673904d6219b1ef65f1d2fb311357de4e56d0fdeb062a6853ba11d57f4305ef2", size = 489822 },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050 },
+]
+
+[[package]]
+name = "slicer"
+version = "0.0.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/f9/b4bce2825b39b57760b361e6131a3dacee3d8951c58cb97ad120abb90317/slicer-0.0.8.tar.gz", hash = "sha256:2e7553af73f0c0c2d355f4afcc3ecf97c6f2156fcf4593955c3f56cf6c4d6eb7", size = 14894 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/81/9ef641ff4e12cbcca30e54e72fb0951a2ba195d0cda0ba4100e532d929db/slicer-0.0.8-py3-none-any.whl", hash = "sha256:6c206258543aecd010d497dc2eca9d2805860a0b3758673903456b7df7934dc3", size = 15251 },
 ]
 
 [[package]]
@@ -3007,6 +3055,26 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/8f/fa/9fb6e594f2ce03ef03eddbdb5f4f90acb1452221a5351116c7c4708ac865/wrapt-1.17.2-cp311-cp311-win32.whl", hash = "sha256:4afd5814270fdf6380616b321fd31435a462019d834f83c8611a0ce7484c7317", size = 36419 },
     { url = "https://files.pythonhosted.org/packages/47/f8/fb1773491a253cbc123c5d5dc15c86041f746ed30416535f2a8df1f4a392/wrapt-1.17.2-cp311-cp311-win_amd64.whl", hash = "sha256:acc130bc0375999da18e3d19e5a86403667ac0c4042a094fefb7eec8ebac7cf3", size = 38773 },
     { url = "https://files.pythonhosted.org/packages/2d/82/f56956041adef78f849db6b289b282e72b55ab8045a75abad81898c28d19/wrapt-1.17.2-py3-none-any.whl", hash = "sha256:b18f2d1533a71f069c7f82d524a52599053d4c7166e9dd374ae2136b7f40f7c8", size = 23594 },
+]
+
+[[package]]
+name = "xgboost"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "nvidia-nccl-cu12", marker = "platform_machine != 'aarch64' and platform_system == 'Linux'" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/82/18/f58f9dcbcca811b30be945fd7f890f87a0ee822f7316e2ddd7a3e3056f08/xgboost-3.0.0.tar.gz", hash = "sha256:45e95416df6f6f01d9a62e60cf09fc57e5ee34697f3858337c796fac9ce3b9ed", size = 1156620 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/6c/d2a1636591e204667f320481b036acc9c526608bcc2319be71cce148102d/xgboost-3.0.0-py3-none-macosx_10_15_x86_64.whl", hash = "sha256:ed8cffd7998bd9431c3b0287a70bec8e45c09b43c9474d9dfd261627713bd890", size = 2245638 },
+    { url = "https://files.pythonhosted.org/packages/5a/0b/f9f815f240a9610d42367172b9f7ef7e8c9113a09b1bb35d4d85f96b910a/xgboost-3.0.0-py3-none-macosx_12_0_arm64.whl", hash = "sha256:314104bd3a1426a40f0c9662eef40e9ab22eb7a8068a42a8d198ce40412db75c", size = 2025491 },
+    { url = "https://files.pythonhosted.org/packages/3c/aa/f4597dc989317d2431cd71998cac1f9205c773658e0cf6680bb9011b26eb/xgboost-3.0.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:72c3405e8dfc37048f9fe339a058fa12b9f0f03bc31d3e56f0887eed2ed2baa1", size = 4841002 },
+    { url = "https://files.pythonhosted.org/packages/ba/ba/b89d99b89946afc842feb8f47302e8022f1405f01212d3e186b6d674b2ba/xgboost-3.0.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:72d39e74649e9b628c4221111aa6a8caa860f2e853b25480424403ee61085126", size = 4903442 },
+    { url = "https://files.pythonhosted.org/packages/bb/68/a7a274bedf43bbf9de120104b438b45e232395f8b9861519040b7b725535/xgboost-3.0.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:7bdee5787f86b83bebd75e2c96caf854760788e5f4203d063da50db5bf0efc5f", size = 4602694 },
+    { url = "https://files.pythonhosted.org/packages/63/f1/653afe1a1b7e1d03f26fd4bd30f3eebcfac2d8982e1a85b6be3355dcae25/xgboost-3.0.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:61c7e391e373b8a5312503525c0689f83ef1912a1236377022865ab340f465a4", size = 253877333 },
+    { url = "https://files.pythonhosted.org/packages/5e/03/15cd49e855c62226ecf1831bbe4c8e73a4324856077a23c495538a36e557/xgboost-3.0.0-py3-none-win_amd64.whl", hash = "sha256:0ea74e97f95b1eddfd27a46b7f22f72ec5a5322e1dc7cb41c9c23fb580763df9", size = 149971978 },
 ]
 
 [[package]]

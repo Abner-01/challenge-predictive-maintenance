@@ -3,7 +3,7 @@
 import pandas as pd
 from pandas.testing import assert_series_equal
 
-from src.features import hours_since_last_event
+from src.transformations.features import hours_since_last_event
 
 
 def test_hours_since_last_event_single_group() -> None:
