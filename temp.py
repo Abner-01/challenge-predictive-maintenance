@@ -11,6 +11,7 @@ from src.features import (
 from src.models.dataloader import FailureDataset
 from src.models.lstm_architecture import LSTMClassifier
 from src.models.trainer import evaluate, train_model
+from src.data_utils import validate_no_leakage, find_first_positive, find_last_positive
 
 ignored_columns = [
     "errorID",
@@ -30,22 +31,41 @@ ignored_columns = [
     "code_error5",
     "model",
 ]
-
+HORIZON = 24
 dfs = load_data()
+dfs.keys()
+
 final_df = merge_multiple_dataframes(dfs)
 
 final_df = add_time_since_last_event_features(final_df)
 final_df = encode_time(final_df)
 final_df = encode_machine_model(final_df)
 
+
 train_split, val_split, test_split = create_splits(
     final_df,
     seq_len=25,
-    horizont=24,
+    horizon=HORIZON,
     random_state=42,
     ignore_columns=ignored_columns,
     split_by_time=True,
+    enable_scaling=True,
 )
+
+if first_positive := find_first_positive(train_split):
+    validate_no_leakage(
+        first_positive[0],
+        dfs["PdM_failures"],
+        horizon=HORIZON,
+    )
+
+if last_postive := find_last_positive(train_split):
+    validate_no_leakage(
+        last_postive[0],
+        dfs["PdM_failures"],
+        horizon=HORIZON,
+    )
+
 drop_cols = ["datetime", "machineID"]
 train_dataset = FailureDataset(train_split, drop_cols=drop_cols)
 val_dataset = FailureDataset(val_split, drop_cols=drop_cols)

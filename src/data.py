@@ -104,7 +104,7 @@ def merge_multiple_dataframes(
 def _generate_failure_examples(
     machine_data: pd.DataFrame,
     seq_len: int,
-    horizont: int,
+    horizon: int,
     label_col: str,
 ) -> list[tuple[pd.DataFrame, float]]:
     """Generate windowed failure examples for a machine. This labels are used for classification.
@@ -112,7 +112,7 @@ def _generate_failure_examples(
     Args:
         machine_data (pd.DataFrame): Time-series data for one machine, sorted by datetime index.
         seq_len (int): Length of the sliding window.
-        horizont (int): How many time steps in the future the failure occurs.
+        horizon (int): How many time steps in the future the failure occurs.
         label_col (str): Name of the column indicating failures (1 for failure, 0 for no failure)
     Returns:
         list[tuple[pd.DataFrame, float]]: list of (window, label=1) tuples.
@@ -120,7 +120,7 @@ def _generate_failure_examples(
     examples = []
     failure_indices = machine_data.index[machine_data[label_col] == 1].tolist()
     for fi in failure_indices:
-        end_idx = fi - horizont
+        end_idx = fi - horizon
         start_idx = end_idx - seq_len
         if start_idx >= 0:
             window_df = machine_data.iloc[start_idx:end_idx]
@@ -133,7 +133,7 @@ def _generate_failure_examples(
 def _generate_non_failure_examples(
     machine_data: pd.DataFrame,
     seq_len: int,
-    horizont: int,
+    horizon: int,
     num_examples: int,
     label_col: str,
     random_state: Optional[int],
@@ -143,7 +143,7 @@ def _generate_non_failure_examples(
     Args:
         machine_data (pd.DataFrame): Time-series data for one machine.
         seq_len (int): Length of the sliding window.
-        horizont (int): How many time steps in the future the failure occurs.
+        horizon (int): How many time steps in the future the failure occurs.
         num_examples (int): Number of negative examples to generate.
         label_col (str): Name of the column indicating failures.
         random_state (Optional[int]): Random seed for reproducibility.
@@ -156,7 +156,7 @@ def _generate_non_failure_examples(
 
     non_failure_indices = machine_data.index[machine_data[label_col] == 0].tolist()
     valid_non_failure_indices = [
-        idx for idx in non_failure_indices if idx >= (horizont + seq_len)
+        idx for idx in non_failure_indices if idx >= (horizon + seq_len)
     ]
 
     if len(non_failure_indices) < num_examples:
@@ -168,7 +168,7 @@ def _generate_non_failure_examples(
     examples = []
 
     for nfi in chosen_indices:
-        end_idx = nfi - horizont
+        end_idx = nfi - horizon
         start_idx = end_idx - seq_len
         if start_idx >= 0:
             window_df = machine_data.iloc[start_idx:end_idx]
@@ -181,7 +181,7 @@ def _generate_non_failure_examples(
 def create_examples_for_machine(
     machine_data: pd.DataFrame,
     seq_len: int,
-    horizont: int,
+    horizon: int,
     random_state: Optional[int] = None,
     label_col: str = LABEL_COLUMN,
 ) -> list[tuple[pd.DataFrame, float]]:
@@ -190,7 +190,7 @@ def create_examples_for_machine(
     Args:
         machine_data (pd.DataFrame): Time-series data for one machine, sorted by datetime index.
         seq_len (int): Length of each sliding window.
-        horizont (int): How many time steps in the future the failure occurs.
+        horizon (int): How many time steps in the future the failure occurs.
         random_state (Optional[int], optional): Random seed for reproducibility. Defaults to None.
         label_col (str, optional): Column name that marks failures. Defaults to LABEL_COLUMN.
 
@@ -201,13 +201,13 @@ def create_examples_for_machine(
     failure_examples = _generate_failure_examples(
         machine_data,
         seq_len,
-        horizont,
+        horizon,
         label_col,
     )
     non_failure_examples = _generate_non_failure_examples(
         machine_data,
         seq_len,
-        horizont,
+        horizon,
         len(failure_examples),
         label_col,
         random_state,
@@ -218,7 +218,7 @@ def create_examples_for_machine(
 def create_examples_for_split(
     split_df: pd.DataFrame,
     seq_len: int,
-    horizont: int,
+    horizon: int,
     random_state: Optional[int] = None,
     label_col: str = LABEL_COLUMN,
 ) -> list[tuple[pd.DataFrame, float]]:
@@ -227,7 +227,7 @@ def create_examples_for_split(
     Args:
         split_df (pd.DataFrame): Data containing multiple machines' time-series records.
         seq_len (int): Length of each sliding window.
-        horizont (int): How many time steps in the future the failure occurs.
+        horizon (int): How many time steps in the future the failure occurs.
         random_state (Optional[int], optional): Random seed for reproducibility. Defaults to None.
         label_col (str, optional): Column name that marks failures. Defaults to LABEL_COLUMN.
 
@@ -240,7 +240,7 @@ def create_examples_for_split(
         examples = create_examples_for_machine(
             machine_data,
             seq_len,
-            horizont,
+            horizon,
             random_state,
             label_col,
         )
@@ -410,13 +410,14 @@ def select_columns(
 def create_splits(
     df: pd.DataFrame,
     seq_len: int,
-    horizont: int,
+    horizon: int,
     random_state: Optional[int] = None,
     scale_columns: Optional[list[str]] = None,
     features: Optional[list[str]] = None,
     ignore_columns: Optional[list[str]] = None,
     label_col: str = LABEL_COLUMN,
     split_by_time: bool = False,
+    enable_scaling: bool = True,
 ) -> tuple[
     list[tuple[pd.DataFrame, float]],
     list[tuple[pd.DataFrame, float]],
@@ -427,7 +428,7 @@ def create_splits(
     Args:
         df (pd.DataFrame): Full dataset containing all machines.
         seq_len (int): Length of each sliding window.
-        horizont (int): How many time steps in the future the failure occurs.
+        horizon (int): How many time steps in the future the failure occurs.
         random_state (Optional[int], optional): Random seed for reproducibility. Defaults to None.
         scale_columns (Optional[list[str]], optional): List of columns to scale.
             If None, automatically select numeric columns.
@@ -460,31 +461,34 @@ def create_splits(
     val_df = select_columns(val_df, features, ignore_columns, label_col)
     test_df = select_columns(test_df, features, ignore_columns, label_col)
 
-    train_df, val_df, test_df = _scale_df(
-        train_df,
-        val_df,
-        test_df,
-        scale_columns=scale_columns,
-    )
+    if enable_scaling:
+        train_df, val_df, test_df = _scale_df(
+            train_df,
+            val_df,
+            test_df,
+            scale_columns=scale_columns,
+        )
+    else:
+        print("Warning skipping scaling. Set enable_scaling=True to enable scaling.")
 
     train_examples = create_examples_for_split(
         train_df,
         seq_len,
-        horizont,
+        horizon,
         random_state,
         label_col,
     )
     val_examples = create_examples_for_split(
         val_df,
         seq_len,
-        horizont,
+        horizon,
         random_state,
         label_col,
     )
     test_examples = create_examples_for_split(
         test_df,
         seq_len,
-        horizont,
+        horizon,
         random_state,
         label_col,
     )
@@ -496,11 +500,10 @@ if __name__ == "__main__":
     dfs = load_data()
     final_df = merge_multiple_dataframes(dfs)
     train_split, val_split, test_split = create_splits(
-        final_df, seq_len=25, horizont=24, random_state=42
+        final_df, seq_len=25, horizon=24, random_state=42
     )
 
     #! TODO:
-    # - Validate n o dataleakage with orignial value form the csv
     # Automatically download the data
     # Change the balancing function to avoid balance test and val
     # Enforce positve horizonts
