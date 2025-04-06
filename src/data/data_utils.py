@@ -169,20 +169,21 @@ def find_last_positive(
 
 def find_timestamps(data, set_name: str):
     """Find the earliest and latest timestamps in the dataset.
+
     Args:
         data: List of tuples containing DataFrames and labels.
     """
-    timestamps = []
+    timestamps: list[pd.DatetimeIndex] = []
     for df, label in data:
         if label == 1:
             if "datetime" in df.columns:
                 timestamps.extend(df["datetime"].tolist())
 
-    timestamps = pd.to_datetime(timestamps)
+    timestamps = pd.to_datetime(timestamps)  # type: ignore
 
-    print(f"📅 Earliest timestamp in {set_name}: {timestamps.min()}")
-    print(f"📅 Latest timestamp in {set_name}: {timestamps.max()}")
-    return timestamps.min(), timestamps.max()
+    print(f"📅 Earliest timestamp in {set_name}: {timestamps.min()}")  # type: ignore
+    print(f"📅 Latest timestamp in {set_name}: {timestamps.max()}")  # type: ignore
+    return timestamps.min(), timestamps.max()  # type: ignore
 
 
 def compare_timestamps(train_split, val_split) -> None:
