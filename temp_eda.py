@@ -1,6 +1,3 @@
-import seaborn as sns  # type: ignore
-import statsmodels.formula.api as smf  # type: ignore
-
 #! TODO:
 # Automatically download the data
 # Change the balancing function to avoid balance test and val
