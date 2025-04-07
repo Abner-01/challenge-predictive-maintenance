@@ -1,4 +1,7 @@
+"""Script containing various EDA functions for time series analysis."""
+
 import matplotlib.pyplot as plt
+import seaborn as sns
 import pandas as pd
 from matplotlib.gridspec import GridSpec
 from scipy.stats import ttest_ind  # type: ignore
@@ -6,32 +9,34 @@ from statsmodels.graphics.tsaplots import plot_acf, plot_pacf  # type: ignore
 from statsmodels.tsa.seasonal import STL  # type: ignore
 from statsmodels.tsa.stattools import adfuller  # type: ignore
 
-
 # ----------------------------------------------------
 # 2. CORRELATION ANALYSIS
 # ----------------------------------------------------
 
 
-def plot_sensor_correlation(df, sensor_columns):
+def plot_correlations(
+    df: pd.DataFrame,
+    sensor_columns: list[str],
+    title: str = "Correlation Matrix of Sensor Readings",
+) -> None:
     """Plot a correlation matrix (heatmap) for the specified sensor columns."""
     corr_matrix = df[sensor_columns].corr()
 
-    plt.figure(figsize=(8, 6))
-    plt.imshow(corr_matrix, cmap="coolwarm", interpolation="none")
-    plt.colorbar()
-    plt.xticks(range(len(sensor_columns)), sensor_columns, rotation=90)
-    plt.yticks(range(len(sensor_columns)), sensor_columns)
-    for i in range(len(sensor_columns)):
-        for j in range(len(sensor_columns)):
-            plt.text(
-                j,
-                i,
-                f"{corr_matrix.iloc[i, j]:.2f}",
-                ha="center",
-                va="center",
-                color="black",
-            )
-    plt.title("Correlation Matrix of Sensor Readings")
+    plt.figure(
+        figsize=(max(10, 0.4 * len(sensor_columns)), max(8, 0.4 * len(sensor_columns)))
+    )
+    sns.heatmap(
+        corr_matrix,
+        annot=True,
+        fmt=".2f",
+        cmap="coolwarm",
+        cbar=True,
+        square=True,
+        linewidths=0.5,
+        linecolor="gray",
+        annot_kws={"size": 6},
+    )
+    plt.title(title)
     plt.tight_layout()
     plt.show()
 
@@ -41,7 +46,7 @@ def plot_sensor_correlation(df, sensor_columns):
 # ----------------------------------------------------
 
 
-def plot_time_series(df_machine, col_name, machine_id):
+def plot_time_series(df_machine: pd.DataFrame, col_name: str, machine_id: str) -> None:
     """Plot the raw time series for a given column of a single machine."""
     plt.figure(figsize=(10, 4))
     plt.plot(df_machine[col_name], label=col_name)
@@ -52,7 +57,9 @@ def plot_time_series(df_machine, col_name, machine_id):
     plt.show()
 
 
-def plot_rolling_statistics(series, col_name, machine_id, window=24):
+def plot_rolling_statistics(
+    series: pd.Series, col_name: str, machine_id: str, window: int = 24
+) -> None:
     """Plot rolling mean and rolling std for a given series."""
     rolling_mean = series.rolling(window=window).mean()
     rolling_std = series.rolling(window=window).std()
@@ -70,7 +77,7 @@ def plot_rolling_statistics(series, col_name, machine_id, window=24):
     plt.show()
 
 
-def adfuller_test(series, col_name):
+def adfuller_test(series: pd.Series, col_name: str) -> None:
     """Run Augmented Dickey-Fuller test on a series and prints results."""
     result = adfuller(series.dropna())
     print(f"ADF Test for {col_name}:")
@@ -79,22 +86,19 @@ def adfuller_test(series, col_name):
     print("-" * 40)
 
 
-def analyze_time_series_for_machine(df, machine_id, sensor_columns, rolling_window=24):
-    """Perform the main time series analysis steps for a single machine:
-
-    - Plots the raw time series
-    - Plots rolling statistics (mean & std)
-    - Runs ADF tests
-    """
-    df_machine = df.loc[machine_id].sort_index()
+def analyze_time_series_for_machine(
+    df: pd.DataFrame,
+    machine_id: str,
+    sensor_columns: list[str],
+    rolling_window: int = 24,
+) -> None:
+    """Perform the main time series analysis steps for a single machine."""
+    df_machine: pd.DataFrame = df.loc[machine_id].sort_index()  # type: ignore
 
     for col in sensor_columns:
         series = df_machine[col]
-        # 1. Raw Series Plot
         plot_time_series(df_machine, col, machine_id)
-        # 2. Rolling Stats
         plot_rolling_statistics(series, col, machine_id, rolling_window)
-        # 3. ADF Test
         adfuller_test(series, col)
 
 
@@ -103,11 +107,25 @@ def analyze_time_series_for_machine(df, machine_id, sensor_columns, rolling_wind
 # ----------------------------------------------------
 
 
-def detect_spikes_in_trend(trend_series, window=24, z_threshold=2.5):
-    """
-    1) Computes a rolling mean and std over the trend component.
-    2) Calculates z-scores (distance from mean in std units).
-    3) Returns a boolean Series where True indicates a spike.
+def detect_spikes_in_trend(
+    trend_series: pd.Series, window: int = 24, z_threshold: float = 2.5
+) -> pd.Series:
+    """Detect spikes in a time series trend component using a rolling z-score method.
+
+    Identify spikes in a trend series by calculating a rolling mean
+    and standard deviation over a specified window, and then computing z-scores
+    to determine how far each point deviates from the rolling mean in terms of
+    standard deviations.
+
+    Args:
+        trend_series (pd.Series): The time series data representing the trend component.
+        window (int, optional): The size of the rolling window to compute the mean
+            and standard deviation. Defaults to 24.
+        z_threshold (float, optional): The z-score threshold above which a point
+            is considered a spike. Defaults to 2.5.
+
+    Returns:
+        pd.Series: A boolean Series where `True` indicates a spike in the trend series.
     """
     rolling_mean = trend_series.rolling(window=window).mean()
     rolling_std = trend_series.rolling(window=window).std()
@@ -119,30 +137,45 @@ def detect_spikes_in_trend(trend_series, window=24, z_threshold=2.5):
 
 
 def analyze_trend_spikes(
-    df,
-    machine_id,
-    sensor_col="volt",
-    failure_flag_col="failure_flag",
-    stl_period=24,
-    window_for_spike=24,
-    z_threshold=2.5,
-):
+    df: pd.DataFrame,
+    machine_id: str,
+    sensor_col: str = "volt",
+    failure_flag_col: str = "failure_flag",
+    stl_period: int = 24,
+    window_for_spike: int = 24,
+    z_threshold: float = 2.5,
+) -> None:
+    """Analyzes trend spikes in sensor data for a specific machine.
+
+    Applies STL to extract the trend component from the specified sensor column and
+    detects spikes in the trend component using a rolling z-score approach to correlate
+    the detected spikes with the time-to-failure and performs a grouped comparison
+    (spike vs no spike).
+
+    Args:
+         df (pd.DataFrame): The input DataFrame containing sensor data for multiple machines.
+         machine_id (str): The identifier for the machine to analyze.
+         sensor_col (str, optional): The name of the column containing sensor data to analyze.
+              Defaults to "volt".
+         failure_flag_col (str, optional): The name of the column indicating failure events.
+              Defaults to "failure_flag".
+         stl_period (int, optional): The seasonal period for STL decomposition. Defaults to 24.
+         window_for_spike (int, optional): The rolling window size for detecting spikes.
+              Defaults to 24.
+         z_threshold (float, optional): The z-score threshold for identifying spikes.
+              Defaults to 2.5.
+
+    Notes:
+         - The function assumes the input DataFrame is indexed by machine IDs and timestamps.
+         - The `compute_time_to_failure` and `corr_spikes` functions must be defined elsewhere
+            in the codebase.
+         - The `_plot_trend_spikes` function is used for visualizing the trend and detected spikes.
     """
-    1) Subsets the DataFrame for a single machine.
-    2) Computes time-to-failure if not present.
-    3) Performs STL on `sensor_col` to extract the trend.
-    4) Detects spikes in that trend using a rolling z-score approach.
-    5) Correlates the spike indicator with time-to-failure and does
-       a quick grouped comparison (spike vs no spike).
-    """
-    # 1) Subset for the chosen machine
     df_machine = df.loc[machine_id].copy().sort_index()
 
-    # 2) Compute TTF if it doesn't exist
     if "time_to_failure" not in df_machine.columns:
-        df_machine = compute_time_to_failure(df_machine, failure_flag_col)
+        df_machine = compute_time_to_failure(df_machine, failure_flag_col)  # type: ignore
 
-    # 3) STL Decomposition to get the trend
     series = df_machine[sensor_col].dropna()
     stl = STL(
         series, period=stl_period, robust=True
@@ -150,46 +183,73 @@ def analyze_trend_spikes(
     result = stl.fit()
     trend = result.trend
 
-    # Align the trend back to the main DataFrame
     df_machine["trend_component"] = trend
+    corr_spikes(df_machine, window_for_spike, z_threshold)  # type: ignore
+    _plot_trend_spikes(df_machine, sensor_col, machine_id)  # type: ignore
 
-    # 4) Detect spikes
-    spikes = detect_spikes_in_trend(
+
+def corr_spikes(
+    df_machine: pd.DataFrame, window_for_spike: int, z_threshold: float
+) -> None:
+    """Analyze the correlation between trend spikes and time to failure (TTF) in a dataset.
+
+    Detects spikes in the trend component of the input DataFrame, calculates
+    the correlation between the detected spikes and the "time_to_failure" column, performs
+    a T-test to compare TTF values for rows with and without spikes, and computes the mean
+    TTF for each spike group.
+
+    Args:
+        df_machine (pd.DataFrame): The input DataFrame containing at least the columns
+            "trend_component" and "time_to_failure".
+        window_for_spike (int): The window size used for detecting spikes in the trend component.
+        z_threshold (float): The Z-score threshold for identifying spikes.
+
+    Returns:
+        None: The function prints the correlation value, T-test results, and mean TTF by
+        spike indicator to the console.
+
+    Notes:
+        - The "trend_spike" column is added to the input DataFrame, where 1 indicates a
+          detected spike and 0 indicates no spike.
+        - If there is insufficient data in one of the spike groups, the T-test is skipped.
+    """
+    spikes: pd.Series = detect_spikes_in_trend(
         df_machine["trend_component"], window=window_for_spike, z_threshold=z_threshold
     )
     df_machine["trend_spike"] = spikes.astype(
         int
     )  # Convert boolean to 0/1 for correlation
 
-    # 5a) Correlation with TTF
-    corr_value = df_machine["trend_spike"].corr(df_machine["time_to_failure"])
+    corr_value: float = df_machine["trend_spike"].corr(df_machine["time_to_failure"])
     print(
         f"\nCorrelation between 'trend_spike' and 'time_to_failure': {corr_value:.4f}"
     )
 
-    # 5b) Compare TTF for spike vs. no spike (t-test or group stats)
-    has_spike = df_machine.loc[
+    has_spike: pd.Series = df_machine.loc[
         df_machine["trend_spike"] == 1, "time_to_failure"
     ].dropna()
-    no_spike = df_machine.loc[
+    no_spike: pd.Series = df_machine.loc[
         df_machine["trend_spike"] == 0, "time_to_failure"
     ].dropna()
 
     if not has_spike.empty and not no_spike.empty:
-        t_stat, p_val = ttest_ind(has_spike, no_spike, equal_var=False)
+        t_stat: float
+        p_val: float
+        t_stat, p_val = ttest_ind(has_spike, no_spike, equal_var=False)  # type: ignore
         print(
             f"T-test between TTF when spike vs. no spike: t-stat={t_stat:.4f}, p-value={p_val:.4f}"
         )
     else:
         print("Not enough data in one of the spike groups for T-test.")
 
-    # 5c) Print group means
-    group_means = df_machine.groupby("trend_spike")["time_to_failure"].mean()
+    group_means: pd.Series = df_machine.groupby("trend_spike")["time_to_failure"].mean()
     print("\nMean TTF by spike indicator:\n", group_means)
 
-    # --- Optional Visualizations ---
 
-    # A) Plot the trend with spike markers
+def _plot_trend_spikes(
+    df_machine: pd.DataFrame, sensor_col: str, machine_id: str
+) -> None:
+    """Helper function to plot trend and spikes."""
     plt.figure(figsize=(10, 5))
     plt.plot(df_machine.index, df_machine["trend_component"], label="Trend")
     plt.scatter(
@@ -207,7 +267,6 @@ def analyze_trend_spikes(
     plt.tight_layout()
     plt.show()
 
-    # B) Scatter plot: TTF vs. trend
     plt.figure(figsize=(8, 5))
     plt.scatter(df_machine["trend_component"], df_machine["time_to_failure"], alpha=0.5)
     plt.title(f"Time-to-Failure vs. Trend (Machine {machine_id})")
@@ -217,7 +276,9 @@ def analyze_trend_spikes(
     plt.show()
 
 
-def plot_stl_decomposition(df, machine_id, col_to_decompose, period=24):
+def plot_stl_decomposition(
+    df: pd.DataFrame, machine_id: str, col_to_decompose: str, period: int = 24
+) -> None:
     """Perform and plots the STL decomposition for a specific sensor column of one machine."""
     df_machine = df.loc[machine_id].sort_index()
     series = df_machine[col_to_decompose].dropna()
@@ -250,7 +311,9 @@ def plot_stl_decomposition(df, machine_id, col_to_decompose, period=24):
 # ----------------------------------------------------
 
 
-def plot_sensor_distributions(df, machine_id, sensor_columns):
+def plot_sensor_distributions(
+    df: pd.DataFrame, machine_id: str, sensor_columns: list[str]
+) -> None:
     """Plot both histograms and boxplots for the specified sensors of a single machine."""
     df_machine = df.loc[machine_id].sort_index()
 
@@ -279,9 +342,10 @@ def plot_sensor_distributions(df, machine_id, sensor_columns):
 # ----------------------------------------------------
 
 
-def plot_acf_and_pacf(df, machine_id, sensor_columns, lags=50):
-    """Plot the autocorrelation and partial autocorrelation for the specified sensors of one machine."""
-
+def plot_acf_and_pacf(
+    df: pd.DataFrame, machine_id: str, sensor_columns: list[str], lags: int = 50
+) -> None:
+    """Plot autocorrelation and partial autocorrelation for the specified sensors."""
     df_machine = df.loc[machine_id].sort_index()
 
     for col in sensor_columns:
@@ -300,7 +364,7 @@ def plot_acf_and_pacf(df, machine_id, sensor_columns, lags=50):
         plot_pacf(series, lags=lags, ax=ax2, zero=False)
         ax2.set_title("PACF")
 
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.tight_layout(rect=(0, 0, 1, 0.95))
         plt.show()
 
 
@@ -309,12 +373,10 @@ def plot_acf_and_pacf(df, machine_id, sensor_columns, lags=50):
 # ----------------------------------------------------
 
 
-def compute_time_to_failure(df_machine, failure_flag_col="failure_flag"):
-    """Function to compute time to failure (TTF) for each row
-    based on a binary failure_flag column.
-
-    Adjust to match your real logic.
-    """
+def compute_time_to_failure(
+    df_machine: pd.DataFrame, failure_flag_col: str = "failure_flag"
+) -> pd.DataFrame:
+    """Compute time to failure (TTF) for each row."""
     df_machine["future_failure_time"] = df_machine.loc[
         df_machine[failure_flag_col] == 1, "datetime"
     ]
@@ -328,12 +390,11 @@ def compute_time_to_failure(df_machine, failure_flag_col="failure_flag"):
     return df_machine
 
 
-def compute_total_failures(df_machine, failure_flag_col="failure_flag"):
-    """Example function to compute time to failure (TTF) for each row
-    based on a binary failure_flag column.
-
-    Adjust to match your real logic.
-    """
+def compute_total_failures(
+    df_machine: pd.DataFrame,
+    failure_flag_col: str = "failure_flag",
+) -> pd.DataFrame:
+    """Compute the past failures (TTF) for each row."""
     df_machine["time_to_failure"] = (
         df_machine[failure_flag_col][::-1]
         .cumsum()[::-1]
@@ -345,13 +406,40 @@ def compute_total_failures(df_machine, failure_flag_col="failure_flag"):
     return df_machine
 
 
-def analyze_weekend_maintenance(df, machine_id, failure_flag_col="failure_flag"):
-    """Investigating whether maintenance on Fri/Sat/Sun differs in subsequent time-to-failure."""
+def analyze_weekend_maintenance(
+    df: pd.DataFrame, machine_id: str | int, failure_flag_col: str = "failure_flag"
+) -> None:
+    """Investigate whether maintenance performed on Fr, Str, or Sun affects in ttf.
+
+    Parameters:
+        df (pd.DataFrame): The input DataFrame containing machine data.
+                           Must have a datetime index and columns for maintenance
+                           and failure flags.
+        machine_id (str or int): The identifier for the machine to analyze.
+        failure_flag_col (str, optional): The column name indicating failure flags.
+                                          Defaults to "failure_flag".
+
+    Returns:
+        None: Prints a summary of time-to-failure statistics and the results of
+              a t-test comparing maintenance on weekends (Fri-Sun) versus other days.
+
+    Notes:
+        - The function assumes the presence of maintenance columns named
+          "maint_comp1", "maint_comp2", "maint_comp3", and "maint_comp4".
+        - If the "time_to_failure" column is not present, it will be computed
+          using the `compute_time_to_failure` function.
+        - A t-test is performed to assess the statistical significance of
+          differences in time-to-failure between weekend and non-weekend maintenance.
+        - A plot of time-to-failure by weekday is generated using `_plot_ttf_weekday`.
+
+    Example:
+        analyze_weekend_maintenance(df, machine_id="machine_01")
+    """
     df_machine = df.loc[machine_id].copy()
     df_machine = df_machine[~df_machine.index.duplicated(keep="first")]
 
     if "time_to_failure" not in df_machine.columns:
-        df_machine = compute_time_to_failure(df_machine, failure_flag_col)
+        df_machine = compute_time_to_failure(df_machine, failure_flag_col)  # type: ignore
 
     df_machine["maintenance_done"] = (
         (df_machine["maint_comp1"] == 1)
@@ -360,7 +448,7 @@ def analyze_weekend_maintenance(df, machine_id, failure_flag_col="failure_flag")
         | (df_machine["maint_comp4"] == 1)
     )
 
-    df_machine["day_of_week"] = df_machine.index.dayofweek
+    df_machine["day_of_week"] = df_machine.index.dayofweek  # type: ignore
     df_machine["is_fri_weekend"] = df_machine["day_of_week"].isin([4, 5, 6])
     df_maint = df_machine[df_machine["maintenance_done"]].copy()
 
@@ -379,12 +467,18 @@ def analyze_weekend_maintenance(df, machine_id, failure_flag_col="failure_flag")
     stat, pval = ttest_ind(group_fri_weekend, group_other_days, equal_var=False)
     print("t-statistic:", stat, "| p-value:", pval)
 
+    _plot_ttf_weekday(df_maint)  # type: ignore
+
+
+def _plot_ttf_weekday(df_maint: pd.DataFrame) -> None:
+    """Plot the mean time to failure (TTF) for maintenance done on weekdays vs. weekends."""
     # Bar plot of the mean TTF
+    df_maint = df_maint[df_maint["time_to_failure"] > 0]
     grouped = df_maint.groupby("is_fri_weekend")["time_to_failure"]
     means = grouped.mean()
     stds = grouped.std()
 
-    labels = ["Weekday (Mon–Thu)", "Fri or Weekend (Fri–Sun)"]
+    labels = ["Weekday (Mon-Thu)", "Fri or Weekend (Fri-Sun)"]
     x = [0, 1]
 
     plt.figure(figsize=(8, 5))
@@ -397,14 +491,24 @@ def analyze_weekend_maintenance(df, machine_id, failure_flag_col="failure_flag")
     plt.show()
 
 
-def analyze_maintenance_by_component(df, machine_id):
-    """Show how time-to-failure differs by maintenance day type (Fri/weekend vs.
+def analyze_maintenance_by_component(df: pd.DataFrame, machine_id: str | int) -> None:
+    """Analyze how the time-to-failure of a machine differs based on the day of maintenance.
 
-    others).
+    Args:
+        df (pd.DataFrame): The input DataFrame containing machine data. It should have
+            columns for maintenance indicators (e.g., 'maint_comp1', 'maint_comp2', etc.)
+            and optionally 'time_to_failure'. The index should be datetime-like.
+        machine_id (str | int): The identifier for the machine to analyze. This is used
+            to filter the DataFrame for the specific machine.
+
+    Notes:
+        - The function assumes the presence of maintenance indicator columns named
+          'maint_comp1', 'maint_comp2', 'maint_comp3', and 'maint_comp4'.
+        - The function generates a 2x2 grid plot to visualize the results for each component.
     """
     df_machine = df.loc[machine_id].copy()
     if "time_to_failure" not in df_machine.columns:
-        df_machine = compute_time_to_failure(df_machine)
+        df_machine = compute_time_to_failure(df_machine)  # type: ignore
 
     df_machine["maintenance_done"] = (
         (df_machine["maint_comp1"] == 1)
@@ -413,8 +517,7 @@ def analyze_maintenance_by_component(df, machine_id):
         | (df_machine["maint_comp4"] == 1)
     )
 
-    # Day-of-week: Monday=0 ... Sunday=6
-    df_machine["day_of_week"] = df_machine.index.dayofweek
+    df_machine["day_of_week"] = df_machine.index.dayofweek  # type: ignore
     df_machine["is_fri_weekend"] = df_machine["day_of_week"].isin([4, 5, 6])
 
     components = ["maint_comp1", "maint_comp2", "maint_comp3", "maint_comp4"]
@@ -437,14 +540,22 @@ def analyze_maintenance_by_component(df, machine_id):
     x_labels = ["Weekday (Mon–Thu)", "Fri or Weekend (Fri–Sun)"]
     x = [0, 1]
 
+    _plot_ttf_maint(components, summary_by_comp, x, x_labels)
+
+
+def _plot_ttf_maint(
+    components: list[str],
+    summary_by_comp: dict[str, dict[str, pd.Series]],
+    x: list[int],
+    x_labels: list[str],
+) -> None:
     _, axs = plt.subplots(2, 2, figsize=(14, 10))
     axs = axs.flatten()
 
     for i, comp in enumerate(components):
         data = summary_by_comp[comp]
         means = data["means"]
-        stds = data["stds"]
-
+        stds = data["stds"].abs()
         axs[i].bar(x, means, yerr=stds, capsize=8)
         axs[i].set_title(f"Time to Failure After {comp.upper()} Maintenance")
         axs[i].set_ylabel("Mean Time to Failure (hrs)")
@@ -453,7 +564,7 @@ def analyze_maintenance_by_component(df, machine_id):
         axs[i].grid(axis="y", linestyle="--", alpha=0.7)
 
     plt.suptitle("Time to Failure by Maintenance Day and Component", fontsize=16)
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
     plt.show()
 
 
@@ -463,50 +574,66 @@ def analyze_maintenance_by_component(df, machine_id):
 
 
 def analyze_time_features(
-    df,
-    machine_id,
-    ttf_col="time_to_failure",
-    time_since_last_failure_col="time_since_last_failure_flag",
-    filter_threshold=10000,
-):
+    df: pd.DataFrame,
+    machine_id: str | int,
+    ttf_col: str = "time_to_failure",
+    time_since_last_failure_col: str = "time_since_last_failure_flag",
+    filter_threshold: int = 10000,
+) -> None:
     """Analyze time features for a specific machine.
 
-    1) Computes correlation of 'hour_sin' and 'hour_cos' with time-to-failure.
-    2) Filters rows where 'time_since_last_failure_flag' < filter_threshold.
-    3) Calculates mean, max, and hourly stats for 'time_since_last_failure_flag'.
+    Compute the correlation of 'hour_sin' and 'hour_cos' with the time-to-failure (TTF) column
+    and Calculate and print insights for the 'time_since_last_failure_flag' column.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing machine data.
+        machine_id (str | int): The identifier for the specific machine to analyze.
+        ttf_col (str, optional): The name of the column representing time-to-failure.
+            Defaults to "time_to_failure".
+        time_since_last_failure_col (str, optional): The name of the column representing time
+            since the last failure. Defaults to "time_since_last_failure_flag".
+        filter_threshold (int, optional): The threshold value for filtering rows based on the
+            'time_since_last_failure_flag' column. Defaults to 10000.
+
+    Returns:
+        None: This function prints the analysis results and does not return any value.
     """
-    df_machine = df.loc[machine_id].copy()
+    df_machine: pd.DataFrame = df.loc[machine_id].copy()  # type: ignore
     if ttf_col not in df_machine.columns:
         df_machine = compute_time_to_failure(df_machine)
 
     if "hour_sin" in df_machine.columns and "hour_cos" in df_machine.columns:
-        corr_sin = df_machine["hour_sin"].corr(df_machine[ttf_col])
-        corr_cos = df_machine["hour_cos"].corr(df_machine[ttf_col])
+        corr_sin: float = df_machine["hour_sin"].corr(df_machine[ttf_col])
+        corr_cos: float = df_machine["hour_cos"].corr(df_machine[ttf_col])
         print(f"Correlation of hour_sin with {ttf_col}: {corr_sin:.4f}")
         print(f"Correlation of hour_cos with {ttf_col}: {corr_cos:.4f}")
     else:
         print("hour_sin/hour_cos columns not found for correlation analysis.")
 
-    df_time = df_machine[
+    df_time: pd.DataFrame = df_machine[
         df_machine[time_since_last_failure_col] < filter_threshold
     ].copy()
 
     if not df_time.empty:
-        mean_val = df_time[time_since_last_failure_col].mean()
-        max_val = df_time[time_since_last_failure_col].max()
-        print(
-            f"Mean of {time_since_last_failure_col} (< {filter_threshold}): {mean_val:.2f}"
-        )
-        print(
-            f"Max of {time_since_last_failure_col} (< {filter_threshold}): {max_val:.2f}"
-        )
-
-        # Hourly grouping if 'hour' not already encoded
-        if "hour" not in df_time.columns:
-            df_time["hour"] = df_time.index.hour  # Extract hour from datetime index
-        hourly_stats = df_time.groupby("hour")[time_since_last_failure_col].agg(
-            ["mean", "median", "std", "count"]
-        )
-        print("\nHourly Statistics:\n", hourly_stats)
+        _print_time_insight(df_time, time_since_last_failure_col, filter_threshold)
     else:
         print(f"No data found with {time_since_last_failure_col} < {filter_threshold}.")
+
+
+def _print_time_insight(
+    df_time: pd.DataFrame, time_since_last_failure_col: str, filter_threshold: int
+) -> None:
+    mean_val: float = df_time[time_since_last_failure_col].mean()
+    max_val: float = df_time[time_since_last_failure_col].max()
+    print(
+        f"Mean of {time_since_last_failure_col} (< {filter_threshold}): {mean_val:.2f}"
+    )
+    print(f"Max of {time_since_last_failure_col} (< {filter_threshold}): {max_val:.2f}")
+
+    # Hourly grouping if 'hour' not already encoded
+    if "hour" not in df_time.columns:
+        df_time["hour"] = df_time.index.hour  # type: ignore
+    hourly_stats: pd.DataFrame = df_time.groupby("hour")[
+        time_since_last_failure_col
+    ].agg(["mean", "median", "std", "count"])
+    print("\nHourly Statistics:\n", hourly_stats)
