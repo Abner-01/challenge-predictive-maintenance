@@ -429,7 +429,7 @@ class DataSplitter:
             self.horizon,
             self.random_state,
             self.label_col,
-            balance=True,
+            balance=False,
         )
         test_examples = create_examples_for_split(
             test_df,
@@ -437,7 +437,7 @@ class DataSplitter:
             self.horizon,
             self.random_state,
             self.label_col,
-            balance=True,
+            balance=False,
         )
 
         return train_examples, val_examples, test_examples

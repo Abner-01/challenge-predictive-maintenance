@@ -26,6 +26,7 @@ class LSTMNetwork:
         num_layers=2,
         num_classes=2,
         dropout=0.3,
+        lr=0.001,
     ):
         """
         Args:
@@ -54,7 +55,7 @@ class LSTMNetwork:
         self.epochs = epochs
         self.batch_size = batch_size
         self.run_info: Optional[RunInfo] = None
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         self.loss_fn = nn.CrossEntropyLoss()
 
     def fit(
