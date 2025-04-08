@@ -23,3 +23,12 @@ To run this project, follow these steps:
    ```bash
    make test
    ```
+
+5. **Lint the code**
+   To check the code style:
+   ```bash
+   make format
+   ```
+
+### Data Sources
+   Remember to download the challenge data into the data folder. [DATA CAN BE FOUND HERE](https://www.kaggle.com/datasets/arnabbiswas1/microsoft-azure-predictive-maintenance/data)

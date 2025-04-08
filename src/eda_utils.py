@@ -1,13 +1,82 @@
 """Script containing various EDA functions for time series analysis."""
 
+from typing import Optional
+
 import matplotlib.pyplot as plt
-import seaborn as sns
 import pandas as pd
+import seaborn as sns  # type: ignore
 from matplotlib.gridspec import GridSpec
 from scipy.stats import ttest_ind  # type: ignore
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf  # type: ignore
 from statsmodels.tsa.seasonal import STL  # type: ignore
 from statsmodels.tsa.stattools import adfuller  # type: ignore
+
+
+# ----------------------------------------------------
+# 1. GENERAL DATA EXPLORATION
+# ----------------------------------------------------
+def check_null(df: pd.DataFrame) -> pd.Series:
+    """Return percentage of rows containing missing data."""
+    return df.isna().sum() * 100 / len(df)
+
+
+def get_missing_dates(series, start_date, end_date, freq="H") -> pd.DatetimeIndex:
+    """Return missing dates in the series."""
+    return pd.date_range(start=start_date, end=end_date, freq=freq).difference(series)
+
+
+def check_duplicate(df: pd.DataFrame, subset: Optional[list[str]] = None) -> int:
+    """Return the number of duplicate rows in the DataFrame."""
+    if subset is not None:
+        return df.duplicated(subset=subset, keep=False).sum()
+    else:
+        return df.duplicated(keep=False).sum()
+
+
+def explore_df(name: str, df: pd.DataFrame) -> None:
+    """Perform basic exploration of a DataFrame."""
+    print(f"\n--- {name} ---")
+    print(f"Shape: {df.shape}")
+    print("Column types:")
+    print(df.dtypes)
+    print("First 3 rows:")
+    print(df.head(3))
+    print("Null values (%):")
+    print(check_null(df))
+    print("Duplicate rows:", check_duplicate(df))
+    if "datetime" in df.columns:
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        print("Datetime range:", df["datetime"].min(), "to", df["datetime"].max())
+    if "machineID" in df.columns:
+        print("Unique machines:", df["machineID"].nunique())
+
+
+def general_exploration(df_dict: dict[str, pd.DataFrame]) -> None:
+    """Perform general exploration on a dictionary of DataFrames."""
+    for name, df in df_dict.items():
+        explore_df(name, df)
+
+    # Count number of failures by component
+    if "PdM_failures" in df_dict:
+        print("\n--- Failure Counts ---")
+        print(df_dict["PdM_failures"]["failure"].value_counts())
+
+    # Describe telemetry
+    if "PdM_telemetry" in df_dict:
+        print("\n--- Telemetry Stats ---")
+        print(df_dict["PdM_telemetry"].describe())
+        missing_dates = get_missing_dates(
+            df_dict["PdM_telemetry"]["datetime"],
+            start_date="2015-01-01 06:00:00",
+            end_date="2016-01-01 06:00:00",
+            freq="H",
+        )
+        print("Missing dates in telemetry: ", len(missing_dates))
+        duplicated_rows = check_duplicate(
+            df_dict["PdM_telemetry"], ["datetime", "machineID"]
+        )
+        print("Duplicated rows in telemetry: ", duplicated_rows)
+
 
 # ----------------------------------------------------
 # 2. CORRELATION ANALYSIS
@@ -249,7 +318,7 @@ def corr_spikes(
 def _plot_trend_spikes(
     df_machine: pd.DataFrame, sensor_col: str, machine_id: str
 ) -> None:
-    """Helper function to plot trend and spikes."""
+    """Plot trend and spikes."""
     plt.figure(figsize=(10, 5))
     plt.plot(df_machine.index, df_machine["trend_component"], label="Trend")
     plt.scatter(
@@ -471,7 +540,10 @@ def analyze_weekend_maintenance(
 
 
 def _plot_ttf_weekday(df_maint: pd.DataFrame) -> None:
-    """Plot the mean time to failure (TTF) for maintenance done on weekdays vs. weekends."""
+    """Plot the mean time to failure (TTF) for maintenance done on weekdays vs.
+
+    weekends.
+    """
     # Bar plot of the mean TTF
     df_maint = df_maint[df_maint["time_to_failure"] > 0]
     grouped = df_maint.groupby("is_fri_weekend")["time_to_failure"]

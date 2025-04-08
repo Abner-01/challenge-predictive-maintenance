@@ -1,3 +1,5 @@
+"""LSTM Network for time series classification."""
+
 from typing import Optional
 
 import numpy as np
@@ -27,8 +29,9 @@ class LSTMNetwork:
         num_classes=2,
         dropout=0.3,
         lr=0.001,
-    ):
-        """
+    ) -> None:
+        """Initialize the LSTM network.
+
         Args:
             input_dim (int): Input feature dimension (excluding dropped columns).
             model_class (type): The PyTorch model class (e.g., LSTMClassifier).
@@ -63,7 +66,7 @@ class LSTMNetwork:
         train_dataset: Dataset,
         val_dataset: Dataset,
     ) -> None:
-
+        """Train the LSTM model on the provided dataset."""
         self.run_info = train_model(
             model=self.model,
             train_dataset=train_dataset,

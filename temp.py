@@ -1,7 +1,9 @@
+"""Experiments script for LSTM and XGBoost models on the PdM dataset."""
+
+import matplotlib.pyplot as plt
+import shap  # type: ignore
 import torch
 import xgboost as xgb
-import shap
-import matplotlib.pyplot as plt
 from sklearn.metrics import (  # type: ignore
     accuracy_score,
     classification_report,
@@ -64,7 +66,6 @@ splitter = DataSplitter(
 )
 train_split, val_split, test_split = splitter.create_splits(final_df)
 
-compare_timestamps(train_split, val_split)
 if first_positive := find_first_positive(train_split):
     validate_no_label_leakage(
         first_positive[0],

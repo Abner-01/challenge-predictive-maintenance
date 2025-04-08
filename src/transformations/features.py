@@ -106,5 +106,3 @@ if __name__ == "main":
     final_df = add_time_since_last_event_features(final_df)
     final_df = encode_time(final_df)
     final_df = encode_machine_model(final_df)
-
-    final_df.columns

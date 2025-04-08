@@ -70,6 +70,7 @@ if (( file_count > 0 )); then
 
     run_tool "mypy" mypy "${valid_files[@]}"
     
+    echo "${valid_files[@]}"
     run_tool "docformatter" docformatter --in-place --wrap-summaries 0 --wrap-descriptions 0 "${valid_files[@]}"
     
     if (( ${#pydocstyle_files[@]} > 0 )); then
