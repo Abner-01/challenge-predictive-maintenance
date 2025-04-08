@@ -345,6 +345,7 @@ class DataSplitter:
         label_col: str = LABEL_COLUMN,
         split_by_time: bool = False,
         enable_scaling: bool = True,
+        balance_val_test: bool = False,
     ) -> None:
         """Initialize the DataSplitter with parameters for splitting and scaling."""
         self.seq_len = seq_len
@@ -357,6 +358,7 @@ class DataSplitter:
         self.split_by_time = split_by_time
         self.enable_scaling = enable_scaling
         self.scaler: Optional[StandardScaler] = None
+        self.balance_val_test = balance_val_test
 
     def create_splits(self, df: pd.DataFrame) -> tuple[
         list[tuple[pd.DataFrame, float]],
@@ -429,7 +431,7 @@ class DataSplitter:
             self.horizon,
             self.random_state,
             self.label_col,
-            balance=False,
+            balance=self.balance_val_test,
         )
         test_examples = create_examples_for_split(
             test_df,
@@ -437,7 +439,7 @@ class DataSplitter:
             self.horizon,
             self.random_state,
             self.label_col,
-            balance=False,
+            balance=self.balance_val_test,
         )
 
         return train_examples, val_examples, test_examples
